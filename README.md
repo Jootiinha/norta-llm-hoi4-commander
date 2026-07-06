@@ -4,6 +4,29 @@ Assistente local para experimentar modelos de linguagem como comandante de Heart
 
 O projeto usa `transformers`, mantem os pesos dos modelos fora do Git e oferece uma interface web para rodar prompts, acompanhar historico e monitorar uso de CPU/GPU durante as execucoes.
 
+## Arquitetura alvo
+
+```text
+HOI4 Wiki
+   ↓
+Coleta via MediaWiki API
+   ↓
+Limpeza + normalizacao
+   ↓
+Chunks com metadados
+   ↓
+1. RAG
+   embeddings + Qdrant/Chroma
+   ↓
+2. Dataset SFT
+   perguntas/respostas
+   ↓
+3. LoRA/QLoRA
+   ajuste de comportamento
+```
+
+O monitor web continua sendo o fluxo de acompanhamento das execucoes locais. Ele deve permanecer separado do pipeline de dados, mas reutilizar os modelos, adapters e indices gerados quando esses componentes forem implementados.
+
 ## Requisitos
 
 - Python 3.11 ou 3.12
@@ -36,19 +59,47 @@ poetry run huggingface-cli login
 
 ```text
 .
+├── adapters/               # adapters LoRA/QLoRA gerados localmente, ignorados pelo Git
+│   └── lora/
+├── configs/                # configuracoes versionaveis de coleta, RAG, SFT e treino
+├── data/                   # dados derivados da HOI4 Wiki, ignorados pelo Git
+│   ├── raw/hoi4_wiki/      # respostas brutas da MediaWiki API
+│   ├── interim/hoi4_wiki/  # paginas limpas e normalizadas
+│   └── processed/chunks/   # chunks com metadados prontos para RAG/SFT
+├── datasets/               # datasets gerados localmente
+│   └── sft/                # perguntas/respostas para fine-tuning supervisionado
 ├── models/                 # modelos baixados localmente, ignorados pelo Git
 ├── scripts/                # scripts de conveniencia
 │   └── setup.sh            # configura venv e instala dependencias
 ├── src/                    # codigo Python do projeto
+│   ├── hoi4_wiki/          # coleta MediaWiki, limpeza, normalizacao e chunking
 │   ├── norta_llm/          # fluxo de inferencia, independente da web
 │   │   └── run_model.py
+│   ├── rag/                # embeddings, indexacao e recuperacao
+│   ├── sft/                # geracao/validacao de dataset SFT
+│   ├── training/           # treino LoRA/QLoRA e avaliacao
 │   ├── web_service/        # servidor e interface web
 │   │   ├── server.py
 │   │   └── metrics.py
+├── vectorstores/           # indices locais Qdrant/Chroma, ignorados pelo Git
+│   ├── chroma/
+│   └── qdrant/
 ├── Makefile                # atalhos de execucao
 ├── pyproject.toml          # dependencias e configuracao do Poetry
 └── README.md               # documentacao do projeto
 ```
+
+## Convenções de artefatos
+
+- `data/raw/hoi4_wiki/`: snapshots brutos da MediaWiki API. Use para reprocessar sem baixar tudo novamente.
+- `data/interim/hoi4_wiki/`: texto limpo, normalizado e ainda proximo da estrutura original das paginas.
+- `data/processed/chunks/`: chunks com metadados, como pagina, secao, URL, revisao, idioma e versao do jogo quando disponivel.
+- `vectorstores/qdrant/` e `vectorstores/chroma/`: indices vetoriais locais para RAG.
+- `datasets/sft/`: datasets de perguntas/respostas derivados dos chunks e de curadoria manual.
+- `adapters/lora/`: adapters LoRA/QLoRA treinados localmente.
+- `models/`: modelos base baixados do Hugging Face.
+
+Esses diretorios guardam dados e artefatos potencialmente grandes. O Git versiona apenas a estrutura com `.gitkeep`; os conteudos gerados ficam locais.
 
 ## Baixar modelos
 

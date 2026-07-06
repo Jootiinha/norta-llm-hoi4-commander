@@ -4,7 +4,9 @@ Orientacoes para agentes que forem trabalhar neste repositorio.
 
 ## Visao geral
 
-Este projeto e um assistente local para testar modelos de linguagem como comandante de Hearts of Iron IV, com foco em recomendacoes de builds, estrategias, prioridades de pesquisa, composicao industrial e acompanhamento de recursos de CPU/GPU durante inferencias.
+Este projeto e um assistente local para estudar modelos de linguagem usando Hearts of Iron IV como dominio de exemplo. O fluxo alvo coleta conteudo da HOI4 Wiki via MediaWiki API, limpa e normaliza paginas, gera chunks com metadados, cria RAG com embeddings + Qdrant/Chroma, deriva dataset SFT de perguntas/respostas e treina adapters LoRA/QLoRA para ajustar comportamento.
+
+O monitor web de execucoes deve ser preservado. Ele continua sendo o fluxo para rodar inferencia local, acompanhar historico, min/max/media e uso de CPU/GPU.
 
 O codigo Python fica diretamente em `src/` e deve ser executado pelos caminhos dos arquivos.
 
@@ -12,15 +14,31 @@ O codigo Python fica diretamente em `src/` e deve ser executado pelos caminhos d
 
 ```text
 .
+├── adapters/               # adapters LoRA/QLoRA locais; nao versionar conteudo gerado
+│   └── lora/
+├── configs/                # configuracoes versionaveis de coleta, RAG, SFT e treino
+├── data/                   # dados da HOI4 Wiki; nao versionar conteudo gerado
+│   ├── raw/hoi4_wiki/      # respostas brutas da MediaWiki API
+│   ├── interim/hoi4_wiki/  # paginas limpas e normalizadas
+│   └── processed/chunks/   # chunks com metadados
+├── datasets/               # datasets gerados localmente; nao versionar conteudo gerado
+│   └── sft/
 ├── models/                 # modelos locais; nao versionar pesos
 ├── scripts/                # scripts de conveniencia
 │   └── setup.sh            # configura venv e instala dependencias
 ├── src/                    # codigo Python do projeto
+│   ├── hoi4_wiki/          # coleta, limpeza, normalizacao e chunking
 │   ├── norta_llm/          # fluxo de inferencia, independente da web
 │   │   └── run_model.py
+│   ├── rag/                # embeddings, indexacao e recuperacao
+│   ├── sft/                # geracao/validacao de dataset SFT
+│   ├── training/           # LoRA/QLoRA e avaliacao
 │   ├── web_service/        # servidor e interface web
 │   │   ├── server.py
 │   │   └── metrics.py
+├── vectorstores/           # indices Qdrant/Chroma locais; nao versionar conteudo gerado
+│   ├── chroma/
+│   └── qdrant/
 ├── Makefile                # atalhos de execucao
 ├── pyproject.toml          # dependencias do Poetry
 ├── poetry.lock             # lockfile do Poetry
@@ -68,9 +86,15 @@ make clean
 ## Regras de manutencao
 
 - Nao versione modelos, pesos, checkpoints ou caches do Hugging Face.
+- Nao versione snapshots da wiki, datasets gerados, indices vetoriais, adapters ou artefatos de treino.
 - Mantenha arquivos grandes dentro de `models/`, que e ignorado pelo Git.
 - Preserve `models/.gitkeep` para manter a pasta no repositorio.
+- Preserve os `.gitkeep` em `data/`, `datasets/`, `vectorstores/` e `adapters/` para manter a estrutura.
 - Prefira comandos via `Makefile` quando existirem.
+- Ao alterar coleta/limpeza/chunking da HOI4 Wiki, trabalhe em `src/hoi4_wiki/`.
+- Ao alterar RAG, embeddings, indexacao ou recuperacao, trabalhe em `src/rag/`.
+- Ao alterar geracao de perguntas/respostas para SFT, trabalhe em `src/sft/`.
+- Ao alterar LoRA/QLoRA, scripts de treino ou avaliacao, trabalhe em `src/training/`.
 - Ao alterar o fluxo de IA, trabalhe em `src/norta_llm/`.
 - Ao alterar a interface/servidor web ou a coleta de metricas da web, trabalhe em `src/web_service/`.
 - Ao criar scripts auxiliares de shell, coloque-os em `scripts/`.

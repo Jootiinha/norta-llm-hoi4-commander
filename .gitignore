@@ -34,6 +34,41 @@ logs/
 outputs/
 runs/
 
+# Data pipeline artifacts
+data/raw/*
+!data/raw/.gitkeep
+!data/raw/hoi4_wiki/
+data/raw/hoi4_wiki/*
+!data/raw/hoi4_wiki/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+!data/interim/hoi4_wiki/
+data/interim/hoi4_wiki/*
+!data/interim/hoi4_wiki/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+!data/processed/chunks/
+data/processed/chunks/*
+!data/processed/chunks/.gitkeep
+datasets/*
+!datasets/.gitkeep
+!datasets/sft/
+datasets/sft/*
+!datasets/sft/.gitkeep
+vectorstores/*
+!vectorstores/.gitkeep
+!vectorstores/qdrant/
+!vectorstores/chroma/
+vectorstores/qdrant/*
+vectorstores/chroma/*
+!vectorstores/qdrant/.gitkeep
+!vectorstores/chroma/.gitkeep
+adapters/*
+!adapters/.gitkeep
+!adapters/lora/
+adapters/lora/*
+!adapters/lora/.gitkeep
+
 # Model weights, checkpoints and local Hugging Face caches
 models/*
 !models/.gitkeep
