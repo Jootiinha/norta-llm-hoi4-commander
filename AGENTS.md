@@ -83,6 +83,14 @@ make extract-data COLLECT_ARGS="--workers 4 --delay 0.2"
 
 O alvo coleta `data/raw/hoi4_wiki/hoi4_pages.jsonl`, remove menu/navegacao e grava paginas em `data/interim/hoi4_wiki/pages/` com manifesto em `data/interim/hoi4_wiki/manifest.jsonl`.
 
+Gerar chunks para RAG e SFT:
+
+```bash
+make chunk-data
+```
+
+O chunker le `data/interim/hoi4_wiki/pages/` e grava `data/processed/chunks/chunks.jsonl` com um `manifest.jsonl` por pagina.
+
 Executar inferencia manualmente:
 
 ```bash

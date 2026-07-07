@@ -182,6 +182,18 @@ make extract-data COLLECT_ARGS="--limit 20"
 
 O conversor remove itens recorrentes de menu e navegacao da wiki, como tabela de conteudo, navboxes, secoes de ferramentas, referencias e imagens de navegacao. A saida fica em `data/interim/hoi4_wiki/pages/`, com um `manifest.jsonl` em `data/interim/hoi4_wiki/`.
 
+Para transformar as paginas limpas em chunks para RAG e SFT:
+
+```bash
+make chunk-data
+```
+
+O chunker le `data/interim/hoi4_wiki/pages/`, produz `data/processed/chunks/chunks.jsonl` e grava um `manifest.jsonl` com contagem de chunks por pagina. Para mudar o tamanho dos chunks:
+
+```bash
+make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1"
+```
+
 ## Interface web
 
 Para acompanhar execucoes, historico, metricas em tempo real e min/max/media por execucao:
@@ -194,6 +206,12 @@ Depois abra:
 
 ```text
 http://127.0.0.1:8000
+```
+
+O servidor web agora roda com Flask em modo de autoreload por padrao nesse comando. Ao salvar mudancas em `src/`, o processo reinicia automaticamente para refletir as alteracoes na pagina. Se quiser desabilitar isso, rode:
+
+```bash
+PYTHONPATH=src poetry run python -B -m web_service.server --no-reload
 ```
 
 A interface web lista automaticamente os modelos encontrados em `models/`, permite iniciar execucoes, selecionar execucoes anteriores e acompanhar CPU, RAM, GPU, VRAM e uso do processo. Cada inferencia roda como processo isolado em uma sessao propria, separada do servidor web.

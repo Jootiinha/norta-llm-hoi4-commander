@@ -70,6 +70,18 @@ def api_get(
             content_type = response.headers.get("content-type", "")
             if "json" not in content_type.lower():
                 snippet = " ".join(response.text[:300].split())
+                if "Client Challenge" in response.text:
+                    raise WikiApiError(
+                        "A HOI4 Wiki retornou uma pagina de Client Challenge em vez "
+                        "de JSON. O endpoint MediaWiki esta bloqueando requisicoes "
+                        "automatizadas neste momento. Tente novamente mais tarde ou "
+                        "informe outro endpoint com --api-url/HOI4_WIKI_API_URL."
+                    )
+                raise WikiApiError(
+                    "Resposta nao JSON da MediaWiki API "
+                    f"(status={response.status_code}, content-type={content_type!r}, "
+                    f"trecho={snippet!r})."
+                )
             return response.json()
         except requests.JSONDecodeError as exc:
             snippet = " ".join(response.text[:300].split())
