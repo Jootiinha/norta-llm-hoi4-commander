@@ -1,7 +1,10 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
+import random
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -10,8 +13,6 @@ import requests
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from tqdm import tqdm
-
-import random
 
 
 DEFAULT_API_URL = "https://hoi4.paradoxwikis.com/api.php"
@@ -24,9 +25,26 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
 }
 
+_THREAD_LOCAL = threading.local()
+
 
 class WikiApiError(RuntimeError):
     """Raised when the MediaWiki API does not return usable JSON."""
+
+
+def build_session(user_agent: str) -> requests.Session:
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    session.headers["User-Agent"] = user_agent
+    return session
+
+
+def thread_session(user_agent: str) -> requests.Session:
+    session = getattr(_THREAD_LOCAL, "session", None)
+    if session is None:
+        session = build_session(user_agent)
+        _THREAD_LOCAL.session = session
+    return session
 
 
 def api_get(
@@ -64,12 +82,16 @@ def api_get(
             last_error = exc
             if attempt == retries:
                 break
-            time.sleep(random.randint(0,1) * attempt)
+            time.sleep((1.5 * attempt) + random.uniform(0.0, 0.5))
 
     raise WikiApiError(f"Falha ao consultar MediaWiki API: {last_error}") from last_error
 
 
-def get_all_pages(session: requests.Session, api_url: str) -> list[dict[str, Any]]:
+def get_all_pages(
+    session: requests.Session,
+    api_url: str,
+    list_delay: float,
+) -> list[dict[str, Any]]:
     pages = []
     apcontinue = None
 
@@ -91,7 +113,8 @@ def get_all_pages(session: requests.Session, api_url: str) -> list[dict[str, Any
             break
 
         apcontinue = data["continue"]["apcontinue"]
-        time.sleep(random.randint(0, 0.5))
+        if list_delay > 0:
+            time.sleep(list_delay)
 
     return pages
 
@@ -165,6 +188,39 @@ def get_page_content(
     }
 
 
+def read_existing_titles(output_path: Path) -> set[str]:
+    if not output_path.exists():
+        return set()
+
+    titles = set()
+    with output_path.open(encoding="utf-8") as file:
+        for line in file:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            title = record.get("title")
+            if isinstance(title, str):
+                titles.add(title)
+    return titles
+
+
+def collect_page(
+    api_url: str,
+    user_agent: str,
+    title: str,
+    delay: float,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    if delay > 0:
+        time.sleep(delay)
+
+    session = thread_session(user_agent)
+    try:
+        return title, get_page_content(session, api_url, title), None
+    except Exception as exc:
+        return title, None, str(exc)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -183,32 +239,105 @@ def main() -> None:
         default=os.environ.get("HOI4_WIKI_USER_AGENT", DEFAULT_USER_AGENT),
         help="Header User-Agent enviado para a MediaWiki API.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Numero de paginas coletadas em paralelo. Use 1 para modo conservador.",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.7,
+        help="Pausa por pagina antes de chamar action=parse.",
+    )
+    parser.add_argument(
+        "--list-delay",
+        type=float,
+        default=0.2,
+        help="Pausa entre chamadas de paginacao da lista allpages.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Limita a quantidade de paginas processadas. 0 processa todas.",
+    )
+    parser.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Pula paginas ja presentes no JSONL de saida.",
+    )
     args = parser.parse_args()
-
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    session.headers["User-Agent"] = args.user_agent
 
     output_path = args.output
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    pages = get_all_pages(session, args.api_url)
+    session = build_session(args.user_agent)
+    pages = get_all_pages(session, args.api_url, args.list_delay)
     print(f"Total de páginas encontradas: {len(pages)}")
 
-    with output_path.open("w", encoding="utf-8") as f:
-        for page in tqdm(pages):
-            title = page["title"]
+    existing_titles = read_existing_titles(output_path) if args.resume else set()
+    if existing_titles:
+        print(f"Paginas ja coletadas: {len(existing_titles)}")
 
-            try:
-                item = get_page_content(session, args.api_url, title)
+    titles = [
+        page["title"]
+        for page in pages
+        if isinstance(page.get("title"), str) and page["title"] not in existing_titles
+    ]
+    if args.limit > 0:
+        titles = titles[: args.limit]
+
+    workers = max(1, args.workers)
+    mode = "a" if args.resume else "w"
+    written = 0
+    failed = 0
+
+    with output_path.open(mode, encoding="utf-8") as file:
+        if workers == 1:
+            iterator = tqdm(titles, desc="Coletando paginas")
+            for title in iterator:
+                _, item, error = collect_page(args.api_url, args.user_agent, title, args.delay)
+                if error:
+                    failed += 1
+                    print(f"Erro ao processar {title}: {error}")
+                    continue
                 if item:
-                    f.write(json.dumps(item, ensure_ascii=False) + "\n")
-            except Exception as exc:
-                print(f"Erro ao processar {title}: {exc}")
-
-            time.sleep(0.7)
+                    file.write(json.dumps(item, ensure_ascii=False) + "\n")
+                    file.flush()
+                    written += 1
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [
+                    executor.submit(
+                        collect_page,
+                        args.api_url,
+                        args.user_agent,
+                        title,
+                        args.delay,
+                    )
+                    for title in titles
+                ]
+                for future in tqdm(
+                    as_completed(futures),
+                    total=len(futures),
+                    desc="Coletando paginas",
+                ):
+                    title, item, error = future.result()
+                    if error:
+                        failed += 1
+                        print(f"Erro ao processar {title}: {error}")
+                        continue
+                    if item:
+                        file.write(json.dumps(item, ensure_ascii=False) + "\n")
+                        file.flush()
+                        written += 1
 
     print(f"Arquivo salvo em: {output_path}")
+    print(f"Paginas novas salvas: {written}")
+    print(f"Falhas: {failed}")
 
 
 if __name__ == "__main__":

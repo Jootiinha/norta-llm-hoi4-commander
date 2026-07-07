@@ -1,4 +1,4 @@
-.PHONY: setup run web convert-wiki clean
+.PHONY: setup run web extract-data clean
 
 setup:
 	bash ./scripts/setup.sh
@@ -11,8 +11,13 @@ run:
 web:
 	PYTHONPATH=src poetry run python -B -m web_service.server
 
-convert-wiki:
-	poetry run python -B src/hoi4_wiki/convert_to_markdown.py
+# Exemplos:
+#   make extract-data
+#   make extract-data COLLECT_ARGS="--workers 4 --delay 0.2"
+#   make extract-data COLLECT_ARGS="--limit 20"
+extract-data:
+	poetry run python -B src/hoi4_wiki/collect_data.py $(COLLECT_ARGS)
+	poetry run python -B src/hoi4_wiki/convert_to_markdown.py $(CONVERT_ARGS)
 
 clean:
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
