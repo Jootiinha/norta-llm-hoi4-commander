@@ -160,6 +160,16 @@ O script padrao usa `models/qwen3-0.6b`:
 make run
 ```
 
+## Preparar dados da HOI4 Wiki
+
+Depois de coletar dados brutos em `data/raw/hoi4_wiki/hoi4_pages.jsonl`, converta para Markdown limpo:
+
+```bash
+make convert-wiki
+```
+
+O conversor remove itens recorrentes de menu e navegacao da wiki, como tabela de conteudo, navboxes, secoes de ferramentas, referencias e imagens de navegacao. A saida fica em `data/interim/hoi4_wiki/pages/`, com um `manifest.jsonl` em `data/interim/hoi4_wiki/`.
+
 ## Interface web
 
 Para acompanhar execucoes, historico, metricas em tempo real e min/max/media por execucao:

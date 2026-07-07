@@ -69,6 +69,14 @@ make web
 
 A interface web e o fluxo principal para acompanhar historico, min/max/media e execucoes. Ela lista modelos a partir de `models/`, roda inferencias em processo isolado, permite ligar/desligar metricas em tempo real e salva a saida completa em `logs/runs/<run_id>/console.log`.
 
+Converter dados brutos da HOI4 Wiki para Markdown limpo:
+
+```bash
+make convert-wiki
+```
+
+O alvo le `data/raw/hoi4_wiki/hoi4_pages.jsonl`, remove menu/navegacao e grava paginas em `data/interim/hoi4_wiki/pages/` com manifesto em `data/interim/hoi4_wiki/manifest.jsonl`.
+
 Executar inferencia manualmente:
 
 ```bash

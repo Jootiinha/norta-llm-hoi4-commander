@@ -1,4 +1,4 @@
-.PHONY: setup run web clean
+.PHONY: setup run web convert-wiki clean
 
 setup:
 	bash ./scripts/setup.sh
@@ -10,6 +10,9 @@ run:
 
 web:
 	PYTHONPATH=src poetry run python -B -m web_service.server
+
+convert-wiki:
+	poetry run python -B src/hoi4_wiki/convert_to_markdown.py
 
 clean:
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
