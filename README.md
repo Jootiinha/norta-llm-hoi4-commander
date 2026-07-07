@@ -194,6 +194,8 @@ O chunker le `data/interim/hoi4_wiki/pages/`, produz `data/processed/chunks/chun
 make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1"
 ```
 
+Antes de cada nova execucao de `make chunk-data`, o projeto salva automaticamente um snapshot dos artefatos atuais em `data/processed/chunks/history/<timestamp>/`. Quando existirem, ele copia `chunks.jsonl`, `manifest.jsonl` e `summary.json`, e grava um `backup.env` com a data e os `CHUNK_ARGS` usados na rodada anterior. Isso facilita comparar iteracoes de chunking sem perder o estado anterior.
+
 ## Interface web
 
 Para acompanhar execucoes, historico, metricas em tempo real e min/max/media por execucao:
