@@ -2,7 +2,7 @@
 
 Assistente local para experimentar modelos de linguagem como comandante de Hearts of Iron IV, com foco em recomendacoes de builds, estrategias, prioridades de pesquisa, composicao industrial e acompanhamento de inferencia.
 
-O projeto usa `transformers`, mantem os pesos dos modelos fora do Git e expoe os fluxos de inferencia e RAG para serem operados pela camada separada `norta-llm-lab-visualization`.
+O projeto usa `transformers`, mantem os pesos dos modelos fora do Git e concentra os fluxos locais de inferencia, RAG, SFT e treino.
 
 ## Arquitetura alvo
 
@@ -25,7 +25,7 @@ Chunks com metadados
    ajuste de comportamento
 ```
 
-A visualizacao e observabilidade das execucoes locais agora vivem em um projeto separado. Este repositorio continua responsavel pelo pipeline de dados, modelos e comandos de inferencia/RAG.
+Este repositorio e responsavel pelo pipeline de dados, modelos e comandos de inferencia/RAG.
 
 ## Requisitos
 
@@ -226,22 +226,6 @@ poetry run python -B src/rag/ask_hoi4_rag.py \
   --model models/qwen3-0.6b \
   --question "Quais focos iniciais ajudam o Brasil a industrializar?" \
   --chunks-path data/processed/chunks/chunks.jsonl
-```
-
-## Visualizacao e operacao
-
-Para acompanhar execucoes, historico, metricas em tempo real e visualizacoes de dados, use o projeto separado:
-
-```bash
-make lab-ui
-```
-
-O comando sobe `../norta-llm-lab-visualization`, que funciona como camada de frontend/BFF e persiste metricas em SQLite local.
-
-Depois abra:
-
-```text
-http://127.0.0.1:8100
 ```
 
 Para escolher outro modelo ou prompt:
