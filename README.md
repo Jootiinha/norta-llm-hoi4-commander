@@ -2,7 +2,7 @@
 
 Assistente local para experimentar modelos de linguagem como comandante de Hearts of Iron IV, com foco em recomendacoes de builds, estrategias, prioridades de pesquisa, composicao industrial e acompanhamento de inferencia.
 
-O projeto usa `transformers`, mantem os pesos dos modelos fora do Git e oferece uma interface web para rodar prompts, acompanhar historico e monitorar uso de CPU/GPU durante as execucoes.
+O projeto usa `transformers`, mantem os pesos dos modelos fora do Git e expoe os fluxos de inferencia e RAG para serem operados pela camada separada `norta-llm-lab-visualization`.
 
 ## Arquitetura alvo
 
@@ -25,7 +25,7 @@ Chunks com metadados
    ajuste de comportamento
 ```
 
-O monitor web continua sendo o fluxo de acompanhamento das execucoes locais. Ele deve permanecer separado do pipeline de dados, mas reutilizar os modelos, adapters e indices gerados quando esses componentes forem implementados.
+A visualizacao e observabilidade das execucoes locais agora vivem em um projeto separado. Este repositorio continua responsavel pelo pipeline de dados, modelos e comandos de inferencia/RAG.
 
 ## Requisitos
 
@@ -78,9 +78,6 @@ poetry run huggingface-cli login
 │   ├── rag/                # embeddings, indexacao e recuperacao
 │   ├── sft/                # geracao/validacao de dataset SFT
 │   ├── training/           # treino LoRA/QLoRA e avaliacao
-│   ├── web_service/        # servidor e interface web
-│   │   ├── server.py
-│   │   └── metrics.py
 ├── vectorstores/           # indices locais Qdrant/Chroma, ignorados pelo Git
 │   ├── chroma/
 │   └── qdrant/
@@ -196,39 +193,21 @@ make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1"
 
 Antes de cada nova execucao de `make chunk-data`, o projeto salva automaticamente um snapshot dos artefatos atuais em `data/processed/chunks/history/<timestamp>/`. Quando existirem, ele copia `chunks.jsonl`, `manifest.jsonl` e `summary.json`, e grava um `backup.env` com a data e os `CHUNK_ARGS` usados na rodada anterior. Isso facilita comparar iteracoes de chunking sem perder o estado anterior.
 
-## Interface web
+## Visualizacao e operacao
 
-Para acompanhar execucoes, historico, metricas em tempo real e min/max/media por execucao:
+Para acompanhar execucoes, historico, metricas em tempo real e visualizacoes de dados, use o projeto separado:
 
 ```bash
-make web
+make lab-ui
 ```
+
+O comando sobe `../norta-llm-lab-visualization`, que funciona como camada de frontend/BFF e persiste metricas em SQLite local.
 
 Depois abra:
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:8100
 ```
-
-O servidor web agora roda com Flask em modo de autoreload por padrao nesse comando. Ao salvar mudancas em `src/`, o processo reinicia automaticamente para refletir as alteracoes na pagina. Se quiser desabilitar isso, rode:
-
-```bash
-PYTHONPATH=src poetry run python -B -m web_service.server --no-reload
-```
-
-A interface web lista automaticamente os modelos encontrados em `models/`, permite iniciar execucoes, selecionar execucoes anteriores e acompanhar CPU, RAM, GPU, VRAM e uso do processo. Cada inferencia roda como processo isolado em uma sessao propria, separada do servidor web.
-
-No formulario da web, voce pode ligar ou desligar metricas em tempo real e escolher o intervalo de coleta. Use intervalos maiores, como 5 segundos, quando quiser reduzir a interferencia do monitoramento.
-
-Os dados de cada execucao ficam em `logs/runs/<run_id>/`:
-
-- `console.log`: saida completa do programa
-- `metrics.jsonl`: amostras de metricas
-- `summary.json`: resumo com minimo, maximo e media
-- `run.env`: parametros usados na execucao
-- `status.txt`: estado final ou atual
-
-O console nao e exibido na interface web; ele fica salvo em `console.log`.
 
 Para escolher outro modelo ou prompt:
 

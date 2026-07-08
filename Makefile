@@ -1,4 +1,4 @@
-.PHONY: setup run web extract-data chunk-data clean
+.PHONY: setup run lab-ui extract-data chunk-data clean
 
 setup:
 	bash ./scripts/setup.sh
@@ -8,8 +8,8 @@ run:
 		--model models/qwen3-0.6b \
 		--prompt "Monte uma build inicial para o Brasil em Hearts of Iron IV focada em industria e exercito."
 
-web:
-	PYTHONPATH=src poetry run python -B -m web_service.server --reload
+lab-ui:
+	cd ../norta-llm-lab-visualization && PYTHONPATH=src python3 -m norta_lab_visualization.server
 
 # Exemplos:
 #   # Coleta completa (script src/hoi4_wiki/collect_data.py):
@@ -37,3 +37,6 @@ chunk-data:
 
 clean:
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
+
+index-data:
+	poetry run python src/rag/index_hoi4_qdrant.py

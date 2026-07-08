@@ -91,3 +91,6 @@ wandb/
 mlruns/
 tensorboard/
 events.out.tfevents*
+
+
+vector_store

@@ -6,7 +6,7 @@ Orientacoes para agentes que forem trabalhar neste repositorio.
 
 Este projeto e um assistente local para estudar modelos de linguagem usando Hearts of Iron IV como dominio de exemplo. O fluxo alvo coleta conteudo da HOI4 Wiki via MediaWiki API, limpa e normaliza paginas, gera chunks com metadados, cria RAG com embeddings + Qdrant/Chroma, deriva dataset SFT de perguntas/respostas e treina adapters LoRA/QLoRA para ajustar comportamento.
 
-O monitor web de execucoes deve ser preservado. Ele continua sendo o fluxo para rodar inferencia local, acompanhar historico, min/max/media e uso de CPU/GPU.
+A visualizacao e observabilidade das execucoes locais foram movidas para o projeto irmao `../norta-llm-lab-visualization`. Este repositorio continua focado no pipeline de dados, inferencia e RAG.
 
 O codigo Python fica diretamente em `src/` e deve ser executado pelos caminhos dos arquivos.
 
@@ -33,9 +33,6 @@ O codigo Python fica diretamente em `src/` e deve ser executado pelos caminhos d
 │   ├── rag/                # embeddings, indexacao e recuperacao
 │   ├── sft/                # geracao/validacao de dataset SFT
 │   ├── training/           # LoRA/QLoRA e avaliacao
-│   ├── web_service/        # servidor e interface web
-│   │   ├── server.py
-│   │   └── metrics.py
 ├── vectorstores/           # indices Qdrant/Chroma locais; nao versionar conteudo gerado
 │   ├── chroma/
 │   └── qdrant/
@@ -61,13 +58,13 @@ Rodar inferencia padrao:
 make run
 ```
 
-Rodar interface web de acompanhamento:
+Rodar a camada de visualizacao/orquestracao:
 
 ```bash
-make web
+make lab-ui
 ```
 
-A interface web e o fluxo principal para acompanhar historico, min/max/media e execucoes. Ela lista modelos a partir de `models/`, roda inferencias em processo isolado, permite ligar/desligar metricas em tempo real e salva a saida completa em `logs/runs/<run_id>/console.log`.
+Esse comando sobe o projeto `../norta-llm-lab-visualization`, que lista modelos a partir de `models/`, roda inferencias em processo isolado, persiste metricas em SQLite local e oferece historico e visualizacao de datasets.
 
 Coletar dados brutos da HOI4 Wiki e converter para Markdown limpo:
 
@@ -118,7 +115,7 @@ make clean
 - Ao alterar geracao de perguntas/respostas para SFT, trabalhe em `src/sft/`.
 - Ao alterar LoRA/QLoRA, scripts de treino ou avaliacao, trabalhe em `src/training/`.
 - Ao alterar o fluxo de IA, trabalhe em `src/norta_llm/`.
-- Ao alterar a interface/servidor web ou a coleta de metricas da web, trabalhe em `src/web_service/`.
+- Ao alterar a visualizacao, observabilidade ou a camada de orquestracao, trabalhe no projeto `../norta-llm-lab-visualization`.
 - Ao criar scripts auxiliares de shell, coloque-os em `scripts/`.
 - Atualize o `README.md` quando mudar comandos, estrutura ou fluxo de uso.
 - Evite mudar os nomes dos diretorios de modelos sem atualizar o `Makefile`, os scripts em `scripts/` e o README.
