@@ -12,6 +12,7 @@ COLLECTION_NAME = "hoi4_wiki"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
 DEFAULT_QDRANT_URL = "http://localhost:6333"
 CHUNKS_PATH = Path("data/processed/chunks/chunks.jsonl")
+DEFAULT_CANDIDATE_MULTIPLIER = 4
 
 
 def load_chunk_lookup(path: Path) -> dict[str, dict]:
@@ -38,18 +39,21 @@ def retrieve(
     chunk_lookup: dict[str, dict],
     chunks_path: Path,
     top_k: int = 5,
+    candidate_multiplier: int = DEFAULT_CANDIDATE_MULTIPLIER,
 ) -> list[dict]:
     client = QdrantClient(url=qdrant_url)
 
     vector = embedder.encode(query, normalize_embeddings=True).tolist()
 
-    results = client.search(
+    candidate_limit = max(top_k, top_k * candidate_multiplier)
+    results = client.query_points(
         collection_name=collection_name,
-        query_vector=vector,
-        limit=top_k,
-    )
+        query=vector,
+        limit=candidate_limit,
+    ).points
 
     contexts = []
+    seen_sources: set[tuple[str, str]] = set()
 
     for hit in results:
         payload = dict(hit.payload or {})
@@ -61,8 +65,21 @@ def retrieve(
                 f"Chunk '{chunk_id}' nao encontrado em {chunks_path}."
             )
 
+        source_key = (
+            str(payload.get("url") or ""),
+            str(payload.get("title") or ""),
+        )
+        if source_key in seen_sources:
+            continue
+
+        seen_sources.add(source_key)
+        payload["score"] = hit.score
         payload["text"] = chunk["text"]
+        payload["section"] = chunk.get("section")
+        payload["subsection"] = chunk.get("subsection")
         contexts.append(payload)
+        if len(contexts) >= top_k:
+            break
 
     return contexts
 
@@ -70,17 +87,27 @@ def retrieve(
 def build_prompt(question: str, contexts: list[dict]) -> str:
     context_text = "\n\n".join(
         [
-            f"[Fonte {i + 1}] {ctx['title']}\nURL: {ctx['url']}\n{ctx['text']}"
+            (
+                f"[Fonte {i + 1}] {ctx['title']}\n"
+                f"URL: {ctx['url']}\n"
+                f"Secao: {ctx.get('section') or '-'}\n"
+                f"Subsecao: {ctx.get('subsection') or '-'}\n"
+                f"Trecho:\n{ctx['text']}"
+            )
             for i, ctx in enumerate(contexts)
         ]
     )
 
     return f"""
-Você é um assistente especialista em Hearts of Iron IV.
+Você e um assistente especialista em Hearts of Iron IV.
 
-Responda em português brasileiro usando apenas o contexto fornecido.
-Se a resposta não estiver no contexto, diga que não encontrou informação suficiente.
-Cite as fontes pelo título da página.
+Regras obrigatorias:
+- Responda em portugues brasileiro usando apenas o contexto fornecido.
+- Nao invente nomes de focos, bonus, predicados ou efeitos.
+- Se a resposta nao estiver clara no contexto, diga explicitamente que nao encontrou informacao suficiente.
+- Ao mencionar um foco, use o nome exato que aparece no contexto.
+- Nao repita o enunciado, nao escreva "Fonte 1", "Answer:" ou "Resposta final:".
+- Responda no formato exato abaixo.
 
 Contexto:
 {context_text}
@@ -89,6 +116,11 @@ Pergunta:
 {question}
 
 Resposta:
+<resposta curta em 2 a 6 frases>
+
+Fontes:
+- <titulo da pagina 1>
+- <titulo da pagina 2>
 """.strip()
 
 
@@ -97,7 +129,7 @@ def generate_answer(model_path: str, prompt: str, max_new_tokens: int) -> str:
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         device_map="auto",
         low_cpu_mem_usage=True,
     )
@@ -108,10 +140,10 @@ def generate_answer(model_path: str, prompt: str, max_new_tokens: int) -> str:
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            do_sample=True,
-            temperature=0.3,
-            top_p=0.9,
+            do_sample=False,
             repetition_penalty=1.1,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
         )
 
     return tokenizer.decode(
@@ -125,11 +157,13 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--question", required=True)
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--candidate-multiplier", type=int, default=DEFAULT_CANDIDATE_MULTIPLIER)
     parser.add_argument("--max-new-tokens", type=int, default=350)
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--collection-name", default=COLLECTION_NAME)
     parser.add_argument("--qdrant-url", default=DEFAULT_QDRANT_URL)
     parser.add_argument("--chunks-path", type=Path, default=CHUNKS_PATH)
+    parser.add_argument("--show-context", action="store_true")
     args = parser.parse_args()
 
     embedder = SentenceTransformer(args.embedding_model)
@@ -142,9 +176,19 @@ def main() -> None:
         chunk_lookup=chunk_lookup,
         chunks_path=args.chunks_path,
         top_k=args.top_k,
+        candidate_multiplier=args.candidate_multiplier,
     )
     prompt = build_prompt(args.question, contexts)
     answer = generate_answer(args.model, prompt, args.max_new_tokens)
+
+    if args.show_context:
+        print("\n--- CONTEXTO RECUPERADO ---\n")
+        for i, ctx in enumerate(contexts, start=1):
+            print(f"[Fonte {i}] {ctx['title']} | score={ctx.get('score', 0):.4f}")
+            print(f"URL: {ctx['url']}")
+            print(f"Secao: {ctx.get('section') or '-'} | Subsecao: {ctx.get('subsection') or '-'}")
+            print(ctx["text"])
+            print()
 
     print("\n--- RESPOSTA ---\n")
     print(answer)
