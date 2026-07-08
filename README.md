@@ -193,6 +193,41 @@ make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1"
 
 Antes de cada nova execucao de `make chunk-data`, o projeto salva automaticamente um snapshot dos artefatos atuais em `data/processed/chunks/history/<timestamp>/`. Quando existirem, ele copia `chunks.jsonl`, `manifest.jsonl` e `summary.json`, e grava um `backup.env` com a data e os `CHUNK_ARGS` usados na rodada anterior. Isso facilita comparar iteracoes de chunking sem perder o estado anterior.
 
+## Indexar no Qdrant
+
+Para indexar os chunks no Qdrant com o embedder padrao:
+
+```bash
+make index-data
+```
+
+O payload salvo no Qdrant guarda apenas metadados do chunk e uma referencia por `chunk_id`. O texto completo continua em `data/processed/chunks/chunks.jsonl`, reduzindo o tamanho do indice e o volume de escrita no banco.
+
+O indexador usa `BAAI/bge-m3` por padrao, que prioriza qualidade multilíngue, mas pode ficar lento em colecoes grandes. Para acelerar, reduza o comprimento maximo processado por chunk, aumente o `batch-size` conforme sua VRAM e, se necessario, troque para um embedder menor:
+
+```bash
+make index-data INDEX_ARGS="--device cuda --batch-size 128 --max-seq-length 1024"
+make index-data INDEX_ARGS="--model intfloat/multilingual-e5-small --device cuda --batch-size 256 --max-seq-length 512"
+```
+
+Se voce trocar o modelo de embedding na indexacao, use o mesmo modelo na consulta:
+
+```bash
+poetry run python -B src/rag/ask_hoi4_rag.py \
+  --model models/qwen3-0.6b \
+  --question "Quais focos iniciais ajudam o Brasil a industrializar?" \
+  --embedding-model intfloat/multilingual-e5-small
+```
+
+Se os chunks estiverem em outro caminho, a consulta precisa apontar para o mesmo arquivo usado na indexacao:
+
+```bash
+poetry run python -B src/rag/ask_hoi4_rag.py \
+  --model models/qwen3-0.6b \
+  --question "Quais focos iniciais ajudam o Brasil a industrializar?" \
+  --chunks-path data/processed/chunks/chunks.jsonl
+```
+
 ## Visualizacao e operacao
 
 Para acompanhar execucoes, historico, metricas em tempo real e visualizacoes de dados, use o projeto separado:

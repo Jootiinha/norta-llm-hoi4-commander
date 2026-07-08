@@ -38,5 +38,7 @@ chunk-data:
 clean:
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
 
+# make index-data INDEX_ARGS="--device cuda --batch-size 128 --max-seq-length 1024"
+# make index-data INDEX_ARGS="--model intfloat/multilingual-e5-small --device cuda --batch-size 256 --max-seq-length 512"
 index-data:
-	poetry run python src/rag/index_hoi4_qdrant.py
+	poetry run python -B src/rag/index_hoi4_qdrant.py $(INDEX_ARGS)

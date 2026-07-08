@@ -1,4 +1,6 @@
 import argparse
+import json
+from pathlib import Path
 
 import torch
 from qdrant_client import QdrantClient
@@ -7,21 +9,62 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 COLLECTION_NAME = "hoi4_wiki"
+DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
+DEFAULT_QDRANT_URL = "http://localhost:6333"
+CHUNKS_PATH = Path("data/processed/chunks/chunks.jsonl")
 
 
-def retrieve(query: str, top_k: int = 5) -> list[dict]:
-    embedder = SentenceTransformer("BAAI/bge-m3")
-    client = QdrantClient(url="http://localhost:6333")
+def load_chunk_lookup(path: Path) -> dict[str, dict]:
+    lookup: dict[str, dict] = {}
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+
+            chunk = json.loads(line)
+            chunk_id = chunk.get("chunk_id") or chunk.get("id")
+            if chunk_id:
+                lookup[chunk_id] = chunk
+
+    return lookup
+
+
+def retrieve(
+    query: str,
+    embedder: SentenceTransformer,
+    qdrant_url: str,
+    collection_name: str,
+    chunk_lookup: dict[str, dict],
+    chunks_path: Path,
+    top_k: int = 5,
+) -> list[dict]:
+    client = QdrantClient(url=qdrant_url)
 
     vector = embedder.encode(query, normalize_embeddings=True).tolist()
 
     results = client.search(
-        collection_name=COLLECTION_NAME,
+        collection_name=collection_name,
         query_vector=vector,
         limit=top_k,
     )
 
-    return [hit.payload for hit in results]
+    contexts = []
+
+    for hit in results:
+        payload = dict(hit.payload or {})
+        chunk_id = payload.get("chunk_id")
+        chunk = chunk_lookup.get(chunk_id) if chunk_id else None
+
+        if chunk is None:
+            raise KeyError(
+                f"Chunk '{chunk_id}' nao encontrado em {chunks_path}."
+            )
+
+        payload["text"] = chunk["text"]
+        contexts.append(payload)
+
+    return contexts
 
 
 def build_prompt(question: str, contexts: list[dict]) -> str:
@@ -83,9 +126,23 @@ def main() -> None:
     parser.add_argument("--question", required=True)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--max-new-tokens", type=int, default=350)
+    parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
+    parser.add_argument("--collection-name", default=COLLECTION_NAME)
+    parser.add_argument("--qdrant-url", default=DEFAULT_QDRANT_URL)
+    parser.add_argument("--chunks-path", type=Path, default=CHUNKS_PATH)
     args = parser.parse_args()
 
-    contexts = retrieve(args.question, top_k=args.top_k)
+    embedder = SentenceTransformer(args.embedding_model)
+    chunk_lookup = load_chunk_lookup(args.chunks_path)
+    contexts = retrieve(
+        args.question,
+        embedder=embedder,
+        qdrant_url=args.qdrant_url,
+        collection_name=args.collection_name,
+        chunk_lookup=chunk_lookup,
+        chunks_path=args.chunks_path,
+        top_k=args.top_k,
+    )
     prompt = build_prompt(args.question, contexts)
     answer = generate_answer(args.model, prompt, args.max_new_tokens)
 
