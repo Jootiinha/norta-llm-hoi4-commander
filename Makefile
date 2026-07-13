@@ -24,10 +24,7 @@ process-data-markdown:
 
 # Exemplos:
 #   make chunk-data
-#   # Chunking semântico (padrão: semantic):
-#   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1 --chunking-strategy semantic --semantic-threshold 0.31 --min-chunk-sentences 3 --semantic-model sentence-transformers/all-MiniLM-L6-v2"
-#   # Chunking por parágrafo (fallback semântico):
-#   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1 --chunking-strategy paragraph"
+#   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1"
 chunk-data:
 # 	bash ./scripts/backup_chunks.sh "$(CHUNK_ARGS)"
 	poetry run python -B src/hoi4_wiki/create_chunks.py $(CHUNK_ARGS)
