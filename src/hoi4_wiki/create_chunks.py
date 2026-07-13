@@ -16,7 +16,7 @@ DEFAULT_OVERLAP_UNITS = 1
 DEFAULT_CHUNKING_STRATEGY = "semantic"
 DEFAULT_SEMANTIC_THRESHOLD = 0.31
 DEFAULT_MIN_SEMANTIC_SENTENCES = 3
-DEFAULT_SEMANTIC_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_SEMANTIC_MODEL = "BAAI/bge-m3"
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")

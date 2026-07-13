@@ -1,0 +1,16 @@
+ Modelos que eu testaria:
+
+   Modelo                                                         Quando usar                       Por quê
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   BAAI/bge-m3                                                    Melhor opção geral                Multilíngue, suporta textos longos, bom para RAG e chunking semântico
+  ─────────────────────────────────────────────────────────────  ────────────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────
+   intfloat/multilingual-e5-large                                 Busca entre português e inglês    Forte para retrieval multilíngue, bom se usuário pergunta em PT e wiki está em EN
+  ─────────────────────────────────────────────────────────────  ────────────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────
+   sentence-transformers/all-MiniLM-L6-v2                         Baseline rápido/local             Muito leve, barato para calcular similaridade entre sentenças
+  ─────────────────────────────────────────────────────────────  ────────────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────
+   sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2    Baseline multilíngue leve         Mais adequado que MiniLM inglês se você tiver PT/EN misturado
+  ─────────────────────────────────────────────────────────────  ────────────────────────────────  ──────────────────────────────────────────────────────────────────────────────────────
+   jinaai/jina-embeddings-v3                                      Alternativa moderna               Bom candidato para comparar, especialmente se quiser embeddings flexíveis por tarefa
+
+
+Modelos que posso usar para chunk

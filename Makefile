@@ -29,7 +29,7 @@ process-data-markdown:
 #   # Chunking por parágrafo (fallback semântico):
 #   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1 --chunking-strategy paragraph"
 chunk-data:
-	bash ./scripts/backup_chunks.sh "$(CHUNK_ARGS)"
+# 	bash ./scripts/backup_chunks.sh "$(CHUNK_ARGS)"
 	poetry run python -B src/hoi4_wiki/create_chunks.py $(CHUNK_ARGS)
 
 clean:
