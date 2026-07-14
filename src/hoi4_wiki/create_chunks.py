@@ -236,7 +236,7 @@ def embed_units(units: list[str], embedder: Any, batch_size: int) -> list[Any]:
         embedder.encode(
             units,
             batch_size=batch_size,
-            show_progress_bar=True,
+            show_progress_bar=False,
             convert_to_numpy=True,
             normalize_embeddings=True,
         )

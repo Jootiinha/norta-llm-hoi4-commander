@@ -34,7 +34,7 @@ chunk-data:
 
 # Exemplos:
 #   make profile-chunk-data
-#   make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --device cuda --batch-size 32"
+#   make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model sentence-transformers/all-MiniLM-L6-v2 --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --device cuda --batch-size 32"
 #	tail -f metrics/20260713-230032-768197-chunk-data/stderr.log
 profile-chunk-data:
 	python3 -B scripts/monitor_command.py --name chunk-data --output-dir $(METRICS_DIR) --interval $(MONITOR_INTERVAL) -- poetry run python -B src/hoi4_wiki/create_chunks.py $(CHUNK_ARGS)
