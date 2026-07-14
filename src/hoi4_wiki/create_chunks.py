@@ -1,18 +1,12 @@
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
+from tqdm import tqdm
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(items=None, **_kwargs):  # type: ignore[no-redef]
-        if items is None:
-            return []
-        return items
-
-    tqdm.write = print  # type: ignore[attr-defined]
+from sentence_transformers import SentenceTransformer
 
 
 DEFAULT_INPUT_DIR = Path("data/interim/hoi4_wiki/pages")
@@ -20,10 +14,14 @@ DEFAULT_OUTPUT = Path("data/processed/chunks/chunks.jsonl")
 DEFAULT_MANIFEST = Path("data/processed/chunks/manifest.jsonl")
 DEFAULT_MAX_CHARS = 1800
 DEFAULT_OVERLAP_UNITS = 1
+DEFAULT_SEMANTIC_MODEL = "BAAI/bge-m3"
+DEFAULT_SEMANTIC_THRESHOLD = 0.31
+DEFAULT_MIN_CHUNK_UNITS = 3
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 WORD_RE = re.compile(r"\w+", re.UNICODE)
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+LIST_OR_TABLE_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|\|)")
 
 
 def parse_scalar(value: str) -> Any:
@@ -103,8 +101,8 @@ def split_into_sections(markdown: str) -> list[dict[str, Any]]:
     return sections
 
 
-def split_into_paragraphs(lines: list[str]) -> list[str]:
-    paragraphs: list[str] = []
+def split_into_blocks(lines: list[str]) -> list[str]:
+    blocks: list[str] = []
     current: list[str] = []
 
     for line in lines:
@@ -113,17 +111,27 @@ def split_into_paragraphs(lines: list[str]) -> list[str]:
             continue
 
         if current:
-            paragraphs.append("\n".join(current).strip())
+            blocks.append("\n".join(current).strip())
             current = []
 
     if current:
-        paragraphs.append("\n".join(current).strip())
+        blocks.append("\n".join(current).strip())
 
-    return paragraphs
+    return blocks
+
+
+def split_block_into_units(block: str) -> list[str]:
+    """Create small semantic units without losing markdown list/table structure."""
+    lines = [line.strip() for line in block.splitlines() if line.strip()]
+    if len(lines) > 1 and any(LIST_OR_TABLE_RE.match(line) for line in lines):
+        return lines
+
+    units = [sentence.strip() for sentence in SENTENCE_RE.split(block) if sentence.strip()]
+    return units or [block.strip()]
 
 
 def split_long_text(text: str, max_chars: int) -> list[str]:
-    """Split a single oversized paragraph without trying to be clever."""
+    """Split one oversized semantic unit as a safety limit."""
     text = text.strip()
     if len(text) <= max_chars:
         return [text]
@@ -148,29 +156,100 @@ def split_long_text(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def pack_paragraphs(paragraphs: list[str], max_chars: int, overlap_units: int) -> list[str]:
-    """Pack paragraphs until max_chars is reached, with optional paragraph overlap."""
+def build_semantic_units(lines: list[str], max_chars: int) -> list[str]:
+    units: list[str] = []
+    for block in split_into_blocks(lines):
+        for unit in split_block_into_units(block):
+            units.extend(split_long_text(unit, max_chars))
+    return [unit for unit in units if unit.strip()]
+
+
+def embed_units(units: list[str], embedder: Any) -> list[Any]:
+    if not units:
+        return []
+    return list(
+        embedder.encode(
+            units,
+            batch_size=64,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+    )
+
+
+def cosine_similarity(left: Any, right: Any) -> float:
+    dot = 0.0
+    norm_left = 0.0
+    norm_right = 0.0
+    for left_value, right_value in zip(left, right):
+        left_float = float(left_value)
+        right_float = float(right_value)
+        dot += left_float * right_float
+        norm_left += left_float * left_float
+        norm_right += right_float * right_float
+    if norm_left == 0.0 or norm_right == 0.0:
+        return 0.0
+    return dot / math.sqrt(norm_left * norm_right)
+
+
+def semantic_chunks(
+    units: list[str],
+    embeddings: list[Any],
+    max_chars: int,
+    overlap_units: int,
+    threshold: float,
+    min_chunk_units: int,
+) -> list[str]:
     chunks: list[str] = []
     current: list[str] = []
+    current_embeddings: list[Any] = []
 
-    for paragraph in paragraphs:
-        for piece in split_long_text(paragraph, max_chars):
-            if not piece:
-                continue
+    def current_text_with(unit: str) -> str:
+        return "\n".join([*current, unit]).strip()
 
-            candidate = "\n\n".join([*current, piece]).strip()
-            if not current or len(candidate) <= max_chars:
-                current.append(piece)
-                continue
+    def flush() -> None:
+        nonlocal current, current_embeddings
+        if current:
+            chunks.append("\n".join(current).strip())
+        if overlap_units > 0:
+            overlap_count = min(overlap_units, len(current))
+            current = current[-overlap_count:]
+            current_embeddings = current_embeddings[-overlap_count:]
+        else:
+            current = []
+            current_embeddings = []
 
-            chunks.append("\n\n".join(current).strip())
-            overlap = current[-overlap_units:] if overlap_units > 0 else []
-            current = [*overlap, piece]
+    for unit, embedding in zip(units, embeddings):
+        unit = unit.strip()
+        if not unit:
+            continue
+
+        if not current:
+            current = [unit]
+            current_embeddings = [embedding]
+            continue
+
+        if len(current_text_with(unit)) > max_chars:
+            flush()
+            current = [unit]
+            current_embeddings = [embedding]
+            continue
+
+        similarity = cosine_similarity(current_embeddings[-1], embedding)
+        if len(current) >= min_chunk_units and similarity < threshold:
+            flush()
+            current = [unit]
+            current_embeddings = [embedding]
+            continue
+
+        current.append(unit)
+        current_embeddings.append(embedding)
 
     if current:
-        chunks.append("\n\n".join(current).strip())
+        chunks.append("\n".join(current).strip())
 
-    return chunks
+    return [chunk for chunk in chunks if chunk]
 
 
 def slugify(value: str, fallback: str) -> str:
@@ -190,14 +269,28 @@ def build_chunks_for_page(
     body: str,
     max_chars: int,
     overlap_units: int,
+    semantic_model: str,
+    semantic_threshold: float,
+    min_chunk_units: int,
+    embedder: Any,
 ) -> list[dict[str, Any]]:
     title = str(metadata.get("title") or page_path.stem)
     chunks: list[dict[str, Any]] = []
     chunk_number = 0
 
     for section_index, section in enumerate(split_into_sections(body), start=1):
-        paragraphs = split_into_paragraphs(section["lines"])
-        section_chunks = pack_paragraphs(paragraphs, max_chars=max_chars, overlap_units=overlap_units)
+
+        units = build_semantic_units(section["lines"], max_chars=max_chars)
+        embeddings = embed_units(units, embedder)
+        
+        section_chunks = semantic_chunks(
+            units=units,
+            embeddings=embeddings,
+            max_chars=max_chars,
+            overlap_units=overlap_units,
+            threshold=semantic_threshold,
+            min_chunk_units=min_chunk_units,
+        )
         section_path = section["section_path"]
 
         for section_chunk_index, text in enumerate(section_chunks, start=1):
@@ -227,6 +320,9 @@ def build_chunks_for_page(
                     "char_count": len(text),
                     "word_count": word_count(text),
                     "token_count": word_count(text),
+                    "chunking_strategy": "semantic",
+                    "semantic_model": semantic_model,
+                    "semantic_threshold": semantic_threshold,
                     "text": text,
                 }
             )
@@ -235,40 +331,44 @@ def build_chunks_for_page(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Cria chunks simples a partir das paginas Markdown da HOI4 Wiki.")
+    parser = argparse.ArgumentParser(description="Cria chunks semanticos a partir das paginas Markdown da HOI4 Wiki.")
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
     parser.add_argument("--overlap-units", type=int, default=DEFAULT_OVERLAP_UNITS)
-
-    # Opcoes antigas mantidas para nao quebrar comandos ja documentados/localmente.
-    parser.add_argument("--chunking-strategy", choices=("paragraph", "semantic"), default="paragraph")
-    parser.add_argument("--semantic-threshold", type=float, default=None)
-    parser.add_argument("--min-chunk-sentences", type=int, default=None)
-    parser.add_argument("--semantic-model", type=str, default=None)
+    parser.add_argument("--semantic-model", type=str, default=DEFAULT_SEMANTIC_MODEL)
+    parser.add_argument("--semantic-threshold", type=float, default=DEFAULT_SEMANTIC_THRESHOLD)
+    parser.add_argument("--min-chunk-units", type=int, default=DEFAULT_MIN_CHUNK_UNITS)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     page_paths = sorted(args.input_dir.glob("*.md"))
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
 
-    if args.chunking_strategy == "semantic":
-        tqdm.write("Aviso: --chunking-strategy semantic foi mantido por compatibilidade, mas este script agora usa chunking por paragrafo.")
+    embedder = SentenceTransformer(args.semantic_model)
 
     total_chunks = 0
+
     with args.output.open("w", encoding="utf-8") as chunk_file, args.manifest.open("w", encoding="utf-8") as manifest_file:
+
         for page_path in tqdm(page_paths, desc="Gerando chunks", unit="pagina", dynamic_ncols=True):
             metadata, body = parse_front_matter(page_path.read_text(encoding="utf-8"))
+
             chunks = build_chunks_for_page(
                 page_path=page_path,
                 metadata=metadata,
                 body=body,
                 max_chars=args.max_chars,
                 overlap_units=args.overlap_units,
+                semantic_model=args.semantic_model,
+                semantic_threshold=args.semantic_threshold,
+                min_chunk_units=args.min_chunk_units,
+                embedder=embedder,
             )
 
             for chunk in chunks:

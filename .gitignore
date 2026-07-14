@@ -33,6 +33,7 @@ Thumbs.db
 logs/
 outputs/
 runs/
+metrics/
 
 # Data pipeline artifacts
 data/raw/*

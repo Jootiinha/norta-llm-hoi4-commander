@@ -185,10 +185,38 @@ Para transformar as paginas limpas em chunks para RAG e SFT:
 make chunk-data
 ```
 
-O chunker le `data/interim/hoi4_wiki/pages/`, produz `data/processed/chunks/chunks.jsonl` e grava um `manifest.jsonl` com contagem de chunks por pagina. Para mudar o tamanho dos chunks:
+O chunker le `data/interim/hoi4_wiki/pages/`, usa embeddings semanticos para detectar mudancas de assunto, produz `data/processed/chunks/chunks.jsonl` e grava um `manifest.jsonl` com contagem de chunks por pagina. Para mudar os parametros:
 
 ```bash
-make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1"
+make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3"
+```
+
+O modelo semantico precisa estar disponivel localmente ou ser baixado pelo Hugging Face na primeira execucao.
+
+Para registrar CPU, memoria, disco e GPU durante a geracao de chunks:
+
+```bash
+make profile-chunk-data
+```
+
+Os relatorios sao gravados em `metrics/<timestamp>-chunk-data/`, com:
+
+- `samples.csv`: amostras coletadas ao longo da execucao;
+- `summary.json`: resumo com picos, totais principais, `started_at` e `finished_at`;
+- `stdout.log` e `stderr.log`: saidas do comando monitorado, com timestamp por linha.
+
+O `samples.csv` tambem inclui `timestamp` e `elapsed_seconds`, o que permite montar graficos de linha do tempo para CPU, memoria, disco e GPU.
+
+Voce tambem pode ajustar o intervalo de coleta e os argumentos do chunker:
+
+```bash
+make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-threshold 0.31"
+```
+
+Para monitorar qualquer outro comando do projeto:
+
+```bash
+make profile-command COMMAND="poetry run python -B src/rag/index_hoi4_qdrant.py"
 ```
 
 Antes de cada nova execucao de `make chunk-data`, o projeto salva automaticamente um snapshot dos artefatos atuais em `data/processed/chunks/history/<timestamp>/`. Quando existirem, ele copia `chunks.jsonl`, `manifest.jsonl` e `summary.json`, e grava um `backup.env` com a data e os `CHUNK_ARGS` usados na rodada anterior. Isso facilita comparar iteracoes de chunking sem perder o estado anterior.
