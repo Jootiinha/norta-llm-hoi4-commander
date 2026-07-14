@@ -6,9 +6,6 @@ from pathlib import Path
 from typing import Any
 from tqdm import tqdm
 
-from sentence_transformers import SentenceTransformer
-
-
 DEFAULT_INPUT_DIR = Path("data/interim/hoi4_wiki/pages")
 DEFAULT_OUTPUT = Path("data/processed/chunks/chunks.jsonl")
 DEFAULT_MANIFEST = Path("data/processed/chunks/manifest.jsonl")
@@ -60,6 +57,20 @@ def parse_heading(line: str) -> tuple[int, str] | None:
     level = len(match.group(1))
     title = match.group(2).strip()
     return level, title
+
+
+def clean_markdown_line(line: str) -> str:
+    line = line.strip()
+    line = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", line)
+    line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+    line = re.sub(r"^#{1,6}\s+", "", line)
+    line = re.sub(r"^[-*+]\s+", "", line)
+    line = re.sub(r"^\d+[.)]\s+", "", line)
+    line = re.sub(r"`([^`]+)`", r"\1", line)
+    line = re.sub(r"\*\*([^*]+)\*\*", r"\1", line)
+    line = re.sub(r"\*([^*]+)\*", r"\1", line)
+    line = re.sub(r"\s+", " ", line)
+    return line.strip()
 
 
 def split_into_sections(markdown: str) -> list[dict[str, Any]]:
@@ -160,8 +171,15 @@ def build_semantic_units(lines: list[str], max_chars: int) -> list[str]:
     units: list[str] = []
     for block in split_into_blocks(lines):
         for unit in split_block_into_units(block):
-            units.extend(split_long_text(unit, max_chars))
+            cleaned = clean_markdown_line(unit)
+            units.extend(split_long_text(cleaned, max_chars))
     return [unit for unit in units if unit.strip()]
+
+
+def load_embedder(model_name: str) -> Any:
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name)
 
 
 def embed_units(units: list[str], embedder: Any) -> list[Any]:
@@ -282,7 +300,7 @@ def build_chunks_for_page(
 
         units = build_semantic_units(section["lines"], max_chars=max_chars)
         embeddings = embed_units(units, embedder)
-        
+
         section_chunks = semantic_chunks(
             units=units,
             embeddings=embeddings,
@@ -350,7 +368,7 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
 
-    embedder = SentenceTransformer(args.semantic_model)
+    embedder = load_embedder(args.semantic_model)
 
     total_chunks = 0
 
