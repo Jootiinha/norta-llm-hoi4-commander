@@ -188,10 +188,20 @@ make chunk-data
 O chunker le `data/interim/hoi4_wiki/pages/`, usa embeddings semanticos para detectar mudancas de assunto, produz `data/processed/chunks/chunks.jsonl` e grava um `manifest.jsonl` com contagem de chunks por pagina. Para mudar os parametros:
 
 ```bash
-make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3"
+make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3 --device cpu --batch-size 64"
 ```
 
-O modelo semantico precisa estar disponivel localmente ou ser baixado pelo Hugging Face na primeira execucao.
+O modelo semantico precisa estar disponivel localmente ou ser baixado pelo Hugging Face na primeira execucao. Se houver GPU NVIDIA disponivel, use `--device cuda` e aumente `--batch-size` conforme a VRAM:
+
+```bash
+make chunk-data CHUNK_ARGS="--device cuda --batch-size 128"
+```
+
+Por padrao, o chunker ignora paginas duplicadas com o mesmo `page_id`/`revision_id` ou mesmo hash de conteudo. Para auditar tudo sem deduplicacao:
+
+```bash
+make chunk-data CHUNK_ARGS="--no-deduplicate-pages"
+```
 
 Para registrar CPU, memoria, disco e GPU durante a geracao de chunks:
 
@@ -210,7 +220,7 @@ O `samples.csv` tambem inclui `timestamp` e `elapsed_seconds`, o que permite mon
 Voce tambem pode ajustar o intervalo de coleta e os argumentos do chunker:
 
 ```bash
-make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-threshold 0.31"
+make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-threshold 0.31 --device cuda --batch-size 128"
 ```
 
 Para monitorar qualquer outro comando do projeto:

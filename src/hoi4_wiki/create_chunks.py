@@ -1,10 +1,20 @@
 import argparse
+import hashlib
 import json
 import math
 import re
 from pathlib import Path
 from typing import Any
-from tqdm import tqdm
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(items=None, **_kwargs):  # type: ignore[no-redef]
+        if items is None:
+            return []
+        return items
+
+    tqdm.write = print  # type: ignore[attr-defined]
 
 DEFAULT_INPUT_DIR = Path("data/interim/hoi4_wiki/pages")
 DEFAULT_OUTPUT = Path("data/processed/chunks/chunks.jsonl")
@@ -14,6 +24,8 @@ DEFAULT_OVERLAP_UNITS = 1
 DEFAULT_SEMANTIC_MODEL = "BAAI/bge-m3"
 DEFAULT_SEMANTIC_THRESHOLD = 0.31
 DEFAULT_MIN_CHUNK_UNITS = 3
+DEFAULT_BATCH_SIZE = 64
+DEFAULT_DEVICE = "cpu"
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 WORD_RE = re.compile(r"\w+", re.UNICODE)
@@ -48,6 +60,41 @@ def parse_front_matter(markdown: str) -> tuple[dict[str, Any], str]:
         metadata[key.strip()] = parse_scalar(value)
 
     return metadata, markdown
+
+
+def page_dedup_key(metadata: dict[str, Any], body: str) -> tuple[str, str]:
+    page_id = metadata.get("page_id")
+    revision_id = metadata.get("revision_id")
+    if page_id is not None and revision_id is not None:
+        return "page_revision", f"{page_id}:{revision_id}"
+    if page_id is not None:
+        return "page", str(page_id)
+    body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return "body_hash", body_hash
+
+
+def load_unique_pages(page_paths: list[Path]) -> tuple[list[dict[str, Any]], int]:
+    pages: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    duplicate_count = 0
+
+    for page_path in page_paths:
+        metadata, body = parse_front_matter(page_path.read_text(encoding="utf-8"))
+        dedup_key = page_dedup_key(metadata, body)
+        if dedup_key in seen_keys:
+            duplicate_count += 1
+            continue
+        seen_keys.add(dedup_key)
+        pages.append(
+            {
+                "page_path": page_path,
+                "metadata": metadata,
+                "body": body,
+                "dedup_key": f"{dedup_key[0]}:{dedup_key[1]}",
+            }
+        )
+
+    return pages, duplicate_count
 
 
 def parse_heading(line: str) -> tuple[int, str] | None:
@@ -176,20 +223,20 @@ def build_semantic_units(lines: list[str], max_chars: int) -> list[str]:
     return [unit for unit in units if unit.strip()]
 
 
-def load_embedder(model_name: str) -> Any:
+def load_embedder(model_name: str, device: str) -> Any:
     from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(model_name)
+    return SentenceTransformer(model_name, device=device)
 
 
-def embed_units(units: list[str], embedder: Any) -> list[Any]:
+def embed_units(units: list[str], embedder: Any, batch_size: int) -> list[Any]:
     if not units:
         return []
     return list(
         embedder.encode(
             units,
-            batch_size=64,
-            show_progress_bar=False,
+            batch_size=batch_size,
+            show_progress_bar=True,
             convert_to_numpy=True,
             normalize_embeddings=True,
         )
@@ -277,6 +324,13 @@ def slugify(value: str, fallback: str) -> str:
     return slug or fallback
 
 
+def page_slug(page_path: Path, metadata: dict[str, Any]) -> str:
+    page_id = metadata.get("page_id")
+    if page_id is not None:
+        return f"p{page_id}-{slugify(str(metadata.get('title') or page_path.stem), page_path.stem)}"
+    return slugify(page_path.stem, "page")
+
+
 def word_count(text: str) -> int:
     return len(WORD_RE.findall(text))
 
@@ -290,26 +344,44 @@ def build_chunks_for_page(
     semantic_model: str,
     semantic_threshold: float,
     min_chunk_units: int,
+    batch_size: int,
+    device: str,
     embedder: Any,
 ) -> list[dict[str, Any]]:
     title = str(metadata.get("title") or page_path.stem)
+    page_key = page_slug(page_path, metadata)
     chunks: list[dict[str, Any]] = []
     chunk_number = 0
+    prepared_sections: list[dict[str, Any]] = []
 
     for section_index, section in enumerate(split_into_sections(body), start=1):
-
         units = build_semantic_units(section["lines"], max_chars=max_chars)
-        embeddings = embed_units(units, embedder)
+        prepared_sections.append(
+            {
+                "section_index": section_index,
+                "section_path": section["section_path"],
+                "units": units,
+            }
+        )
 
+    page_units = [unit for section in prepared_sections for unit in section["units"]]
+    page_embeddings = embed_units(page_units, embedder, batch_size=batch_size)
+    embedding_offset = 0
+
+    for section in prepared_sections:
+        units = section["units"]
+        section_embeddings = page_embeddings[embedding_offset : embedding_offset + len(units)]
+        embedding_offset += len(units)
         section_chunks = semantic_chunks(
             units=units,
-            embeddings=embeddings,
+            embeddings=section_embeddings,
             max_chars=max_chars,
             overlap_units=overlap_units,
             threshold=semantic_threshold,
             min_chunk_units=min_chunk_units,
         )
         section_path = section["section_path"]
+        section_index = section["section_index"]
 
         for section_chunk_index, text in enumerate(section_chunks, start=1):
             text = text.strip()
@@ -317,7 +389,7 @@ def build_chunks_for_page(
                 continue
 
             chunk_number += 1
-            chunk_id = f"{slugify(title, page_path.stem)}-{chunk_number:04d}"
+            chunk_id = f"{page_key}-{chunk_number:04d}"
             chunks.append(
                 {
                     "id": chunk_id,
@@ -341,6 +413,8 @@ def build_chunks_for_page(
                     "chunking_strategy": "semantic",
                     "semantic_model": semantic_model,
                     "semantic_threshold": semantic_threshold,
+                    "embedding_device": device,
+                    "embedding_batch_size": batch_size,
                     "text": text,
                 }
             )
@@ -358,24 +432,44 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--semantic-model", type=str, default=DEFAULT_SEMANTIC_MODEL)
     parser.add_argument("--semantic-threshold", type=float, default=DEFAULT_SEMANTIC_THRESHOLD)
     parser.add_argument("--min-chunk-units", type=int, default=DEFAULT_MIN_CHUNK_UNITS)
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--device", type=str, default=DEFAULT_DEVICE, choices=("cpu", "cuda", "mps"))
+    parser.add_argument("--no-deduplicate-pages", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     page_paths = sorted(args.input_dir.glob("*.md"))
+    if args.no_deduplicate_pages:
+        pages = []
+        for page_path in page_paths:
+            metadata, body = parse_front_matter(page_path.read_text(encoding="utf-8"))
+            pages.append(
+                {
+                    "page_path": page_path,
+                    "metadata": metadata,
+                    "body": body,
+                    "dedup_key": None,
+                }
+            )
+        duplicate_page_count = 0
+    else:
+        pages, duplicate_page_count = load_unique_pages(page_paths)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
 
-    embedder = load_embedder(args.semantic_model)
+    embedder = load_embedder(args.semantic_model, device=args.device)
 
     total_chunks = 0
 
     with args.output.open("w", encoding="utf-8") as chunk_file, args.manifest.open("w", encoding="utf-8") as manifest_file:
 
-        for page_path in tqdm(page_paths, desc="Gerando chunks", unit="pagina", dynamic_ncols=True):
-            metadata, body = parse_front_matter(page_path.read_text(encoding="utf-8"))
+        for page in tqdm(pages, desc="Gerando chunks", unit="pagina", dynamic_ncols=True):
+            page_path = page["page_path"]
+            metadata = page["metadata"]
+            body = page["body"]
 
             chunks = build_chunks_for_page(
                 page_path=page_path,
@@ -386,6 +480,8 @@ def main() -> None:
                 semantic_model=args.semantic_model,
                 semantic_threshold=args.semantic_threshold,
                 min_chunk_units=args.min_chunk_units,
+                batch_size=args.batch_size,
+                device=args.device,
                 embedder=embedder,
             )
 
@@ -400,6 +496,7 @@ def main() -> None:
                         "display_title": metadata.get("display_title"),
                         "page_id": metadata.get("page_id"),
                         "revision_id": metadata.get("revision_id"),
+                        "dedup_key": page["dedup_key"],
                         "chunk_count": len(chunks),
                     },
                     ensure_ascii=False,
@@ -408,7 +505,9 @@ def main() -> None:
             )
             total_chunks += len(chunks)
 
-    tqdm.write(f"Paginas lidas: {len(page_paths)}")
+    tqdm.write(f"Paginas encontradas: {len(page_paths)}")
+    tqdm.write(f"Paginas duplicadas ignoradas: {duplicate_page_count}")
+    tqdm.write(f"Paginas processadas: {len(pages)}")
     tqdm.write(f"Chunks gerados: {total_chunks}")
     tqdm.write(f"Arquivo de chunks: {args.output}")
     tqdm.write(f"Manifest: {args.manifest}")

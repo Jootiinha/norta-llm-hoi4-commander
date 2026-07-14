@@ -27,14 +27,15 @@ process-data-markdown:
 
 # Exemplos:
 #   make chunk-data
-#   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3"
+#   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3 --device cuda --batch-size 128"
 chunk-data:
 # 	bash ./scripts/backup_chunks.sh "$(CHUNK_ARGS)"
 	poetry run python -B src/hoi4_wiki/create_chunks.py $(CHUNK_ARGS)
 
 # Exemplos:
 #   make profile-chunk-data
-#   make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-threshold 0.31"
+#   make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --device cuda --batch-size 32"
+#	tail -f metrics/20260713-230032-768197-chunk-data/stderr.log
 profile-chunk-data:
 	python3 -B scripts/monitor_command.py --name chunk-data --output-dir $(METRICS_DIR) --interval $(MONITOR_INTERVAL) -- poetry run python -B src/hoi4_wiki/create_chunks.py $(CHUNK_ARGS)
 
