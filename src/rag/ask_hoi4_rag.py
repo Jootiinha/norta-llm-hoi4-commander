@@ -1,7 +1,6 @@
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import torch
 from qdrant_client import QdrantClient
@@ -17,8 +16,7 @@ DEFAULT_CANDIDATE_MULTIPLIER = 4
 
 
 def exit_with_message(message: str) -> None:
-    print(message, file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(message)
 
 
 def needs_e5_prefix(model_name: str) -> bool:

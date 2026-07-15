@@ -270,6 +270,14 @@ poetry run python -B src/rag/ask_hoi4_rag.py \
   --chunks-path data/processed/chunks/chunks.jsonl
 ```
 
+Para usar uma interface web local para conversar com o RAG:
+
+```bash
+make web-rag
+```
+
+Acesse `http://127.0.0.1:7860`. A interface usa por padrao `models/qwen3-0.6b`, `intfloat/multilingual-e5-small`, `data/processed/chunks/chunks.jsonl` e a colecao Qdrant `hoi4_wiki`. Antes de perguntar, garanta que os chunks foram indexados com `make index-data`.
+
 Para escolher outro modelo ou prompt:
 
 ```bash

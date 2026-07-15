@@ -1,7 +1,9 @@
-.PHONY: setup run extract-data chunk-data profile-chunk-data profile-command clean
+.PHONY: setup run extract-data chunk-data profile-chunk-data profile-command web-rag clean
 
 METRICS_DIR ?= metrics
 MONITOR_INTERVAL ?= 1.0
+WEB_HOST ?= 127.0.0.1
+WEB_PORT ?= 7860
 
 setup:
 	bash ./scripts/setup.sh
@@ -53,3 +55,6 @@ clean:
 # make index-data INDEX_ARGS="--model intfloat/multilingual-e5-large --device cuda --encode-batch-size 32 --upload-batch-size 128 --max-seq-length 512"
 index-data:
 	poetry run python -B src/rag/index_hoi4_qdrant.py $(INDEX_ARGS)
+
+web-rag:
+	poetry run python -B src/rag/web_hoi4_rag.py --host $(WEB_HOST) --port $(WEB_PORT)
