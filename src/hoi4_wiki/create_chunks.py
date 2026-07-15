@@ -26,6 +26,8 @@ DEFAULT_SEMANTIC_THRESHOLD = 0.31
 DEFAULT_MIN_CHUNK_UNITS = 3
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_DEVICE = "cpu"
+DEFAULT_STRUCTURED_GROUP_LINES = 8
+DEFAULT_MIN_UNIT_CHARS = 12
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 WORD_RE = re.compile(r"\w+", re.UNICODE)
@@ -178,11 +180,32 @@ def split_into_blocks(lines: list[str]) -> list[str]:
     return blocks
 
 
-def split_block_into_units(block: str) -> list[str]:
+def pack_structured_lines(lines: list[str], group_lines: int, max_chars: int) -> list[str]:
+    if group_lines <= 1:
+        return lines
+
+    groups: list[str] = []
+    current: list[str] = []
+
+    for line in lines:
+        candidate = "\n".join([*current, line]).strip()
+        if current and (len(current) >= group_lines or len(candidate) > max_chars):
+            groups.append("\n".join(current).strip())
+            current = [line]
+        else:
+            current.append(line)
+
+    if current:
+        groups.append("\n".join(current).strip())
+
+    return groups
+
+
+def split_block_into_units(block: str, structured_group_lines: int, max_chars: int) -> list[str]:
     """Create small semantic units without losing markdown list/table structure."""
     lines = [line.strip() for line in block.splitlines() if line.strip()]
     if len(lines) > 1 and any(LIST_OR_TABLE_RE.match(line) for line in lines):
-        return lines
+        return pack_structured_lines(lines, group_lines=structured_group_lines, max_chars=max_chars)
 
     units = [sentence.strip() for sentence in SENTENCE_RE.split(block) if sentence.strip()]
     return units or [block.strip()]
@@ -214,13 +237,43 @@ def split_long_text(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def build_semantic_units(lines: list[str], max_chars: int) -> list[str]:
+def normalize_unit_for_dedup(unit: str) -> str:
+    return re.sub(r"\s+", " ", unit).strip().lower()
+
+
+def preprocess_semantic_units(units: list[str], min_unit_chars: int) -> list[str]:
+    processed: list[str] = []
+    previous_key = ""
+
+    for unit in units:
+        unit = unit.strip()
+        if not unit:
+            continue
+        if len(unit) < min_unit_chars and not processed:
+            continue
+
+        dedup_key = normalize_unit_for_dedup(unit)
+        if dedup_key == previous_key:
+            continue
+
+        processed.append(unit)
+        previous_key = dedup_key
+
+    return processed
+
+
+def build_semantic_units(
+    lines: list[str],
+    max_chars: int,
+    structured_group_lines: int,
+    min_unit_chars: int,
+) -> list[str]:
     units: list[str] = []
     for block in split_into_blocks(lines):
-        for unit in split_block_into_units(block):
+        for unit in split_block_into_units(block, structured_group_lines=structured_group_lines, max_chars=max_chars):
             cleaned = clean_markdown_line(unit)
             units.extend(split_long_text(cleaned, max_chars))
-    return [unit for unit in units if unit.strip()]
+    return preprocess_semantic_units(units, min_unit_chars=min_unit_chars)
 
 
 def load_embedder(model_name: str, device: str) -> Any:
@@ -346,6 +399,8 @@ def build_chunks_for_page(
     min_chunk_units: int,
     batch_size: int,
     device: str,
+    structured_group_lines: int,
+    min_unit_chars: int,
     embedder: Any,
 ) -> list[dict[str, Any]]:
     title = str(metadata.get("title") or page_path.stem)
@@ -355,7 +410,12 @@ def build_chunks_for_page(
     prepared_sections: list[dict[str, Any]] = []
 
     for section_index, section in enumerate(split_into_sections(body), start=1):
-        units = build_semantic_units(section["lines"], max_chars=max_chars)
+        units = build_semantic_units(
+            section["lines"],
+            max_chars=max_chars,
+            structured_group_lines=structured_group_lines,
+            min_unit_chars=min_unit_chars,
+        )
         prepared_sections.append(
             {
                 "section_index": section_index,
@@ -415,6 +475,8 @@ def build_chunks_for_page(
                     "semantic_threshold": semantic_threshold,
                     "embedding_device": device,
                     "embedding_batch_size": batch_size,
+                    "structured_group_lines": structured_group_lines,
+                    "min_unit_chars": min_unit_chars,
                     "text": text,
                 }
             )
@@ -434,6 +496,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-chunk-units", type=int, default=DEFAULT_MIN_CHUNK_UNITS)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--device", type=str, default=DEFAULT_DEVICE, choices=("cpu", "cuda", "mps"))
+    parser.add_argument("--structured-group-lines", type=int, default=DEFAULT_STRUCTURED_GROUP_LINES)
+    parser.add_argument("--min-unit-chars", type=int, default=DEFAULT_MIN_UNIT_CHARS)
     parser.add_argument("--no-deduplicate-pages", action="store_true")
     return parser.parse_args()
 
@@ -482,6 +546,8 @@ def main() -> None:
                 min_chunk_units=args.min_chunk_units,
                 batch_size=args.batch_size,
                 device=args.device,
+                structured_group_lines=args.structured_group_lines,
+                min_unit_chars=args.min_unit_chars,
                 embedder=embedder,
             )
 

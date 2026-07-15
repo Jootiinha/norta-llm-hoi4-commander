@@ -188,8 +188,10 @@ make chunk-data
 O chunker le `data/interim/hoi4_wiki/pages/`, usa embeddings semanticos para detectar mudancas de assunto, produz `data/processed/chunks/chunks.jsonl` e grava um `manifest.jsonl` com contagem de chunks por pagina. Para mudar os parametros:
 
 ```bash
-make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3 --device cpu --batch-size 64"
+make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cpu --batch-size 64"
 ```
+
+Antes de gerar embeddings, o chunker agrupa linhas estruturadas de listas/tabelas com `--structured-group-lines` e remove unidades muito curtas com `--min-unit-chars`. Isso reduz o numero de chamadas ao modelo semantico em paginas grandes de listas/tabelas.
 
 O modelo semantico precisa estar disponivel localmente ou ser baixado pelo Hugging Face na primeira execucao. Se houver GPU NVIDIA disponivel, use `--device cuda` e aumente `--batch-size` conforme a VRAM:
 
@@ -220,7 +222,7 @@ O `samples.csv` tambem inclui `timestamp` e `elapsed_seconds`, o que permite mon
 Voce tambem pode ajustar o intervalo de coleta e os argumentos do chunker:
 
 ```bash
-make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-threshold 0.31 --device cuda --batch-size 128"
+make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-threshold 0.31 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 128"
 ```
 
 Para monitorar qualquer outro comando do projeto:
@@ -241,11 +243,13 @@ make index-data
 
 O payload salvo no Qdrant guarda apenas metadados do chunk e uma referencia por `chunk_id`. O texto completo continua em `data/processed/chunks/chunks.jsonl`, reduzindo o tamanho do indice e o volume de escrita no banco.
 
-O indexador usa `BAAI/bge-m3` por padrao, que prioriza qualidade multilíngue, mas pode ficar lento em colecoes grandes. Para acelerar, reduza o comprimento maximo processado por chunk, aumente o `batch-size` conforme sua VRAM e, se necessario, troque para um embedder menor:
+O indexador usa `intfloat/multilingual-e5-small` por padrao, um bom equilibrio entre qualidade multilíngue e velocidade. Para modelos E5, o indexador adiciona automaticamente o prefixo `passage:` aos chunks e a consulta adiciona `query:` às perguntas.
+
+Para acelerar, reduza o comprimento maximo processado por chunk e ajuste separadamente o batch de embedding e o batch de upload:
 
 ```bash
-make index-data INDEX_ARGS="--device cuda --batch-size 128 --max-seq-length 1024"
-make index-data INDEX_ARGS="--model intfloat/multilingual-e5-small --device cuda --batch-size 256 --max-seq-length 512"
+make index-data INDEX_ARGS="--device cuda --encode-batch-size 256 --upload-batch-size 512 --max-seq-length 512"
+make index-data INDEX_ARGS="--model intfloat/multilingual-e5-large --device cuda --encode-batch-size 32 --upload-batch-size 128 --max-seq-length 512"
 ```
 
 Se voce trocar o modelo de embedding na indexacao, use o mesmo modelo na consulta:

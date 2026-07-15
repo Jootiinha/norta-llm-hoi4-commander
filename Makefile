@@ -27,16 +27,17 @@ process-data-markdown:
 
 # Exemplos:
 #   make chunk-data
-#   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3 --device cuda --batch-size 128"
+#   make chunk-data CHUNK_ARGS="--input-dir data/interim/hoi4_wiki/pages --output data/processed/chunks/chunks.jsonl --manifest data/processed/chunks/manifest.jsonl --max-chars 1800 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 128"
 chunk-data:
-# 	bash ./scripts/backup_chunks.sh "$(CHUNK_ARGS)"
+	bash ./scripts/backup_chunks.sh "$(CHUNK_ARGS)"
 	poetry run python -B src/hoi4_wiki/create_chunks.py $(CHUNK_ARGS)
 
 # Exemplos:
 #   make profile-chunk-data
-#   make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model sentence-transformers/all-MiniLM-L6-v2 --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --device cuda --batch-size 32"
+#   make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model sentence-transformers/all-MiniLM-L6-v2 --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 32"
 #	tail -f metrics/20260713-230032-768197-chunk-data/stderr.log
 profile-chunk-data:
+	bash ./scripts/backup_chunks.sh "$(CHUNK_ARGS)"
 	python3 -B scripts/monitor_command.py --name chunk-data --output-dir $(METRICS_DIR) --interval $(MONITOR_INTERVAL) -- poetry run python -B src/hoi4_wiki/create_chunks.py $(CHUNK_ARGS)
 
 # Exemplo:
@@ -47,7 +48,8 @@ profile-command:
 clean:
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
 
-# make index-data INDEX_ARGS="--device cuda --batch-size 128 --max-seq-length 1024"
-# make index-data INDEX_ARGS="--model intfloat/multilingual-e5-small --device cuda --batch-size 256 --max-seq-length 512"
+# make index-data INDEX_ARGS="--device cuda --encode-batch-size 256 --upload-batch-size 256 --max-seq-length 512"
+# make index-data INDEX_ARGS="--model intfloat/multilingual-e5-small --device cuda --encode-batch-size 256 --upload-batch-size 512 --max-seq-length 512"
+# make index-data INDEX_ARGS="--model intfloat/multilingual-e5-large --device cuda --encode-batch-size 32 --upload-batch-size 128 --max-seq-length 512"
 index-data:
 	poetry run python -B src/rag/index_hoi4_qdrant.py $(INDEX_ARGS)

@@ -1,6 +1,7 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import torch
 from qdrant_client import QdrantClient
@@ -9,13 +10,35 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 COLLECTION_NAME = "hoi4_wiki"
-DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
+DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_QDRANT_URL = "http://localhost:6333"
 CHUNKS_PATH = Path("data/processed/chunks/chunks.jsonl")
 DEFAULT_CANDIDATE_MULTIPLIER = 4
 
 
+def exit_with_message(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def needs_e5_prefix(model_name: str) -> bool:
+    return "e5" in model_name.lower()
+
+
+def format_query(query: str, model_name: str) -> str:
+    if not needs_e5_prefix(model_name):
+        return query
+    return f"query: {query}"
+
+
 def load_chunk_lookup(path: Path) -> dict[str, dict]:
+    if not path.exists():
+        exit_with_message(
+            f"Arquivo de chunks nao encontrado: {path}\n"
+            "Gere os chunks antes da consulta com:\n"
+            "  make chunk-data"
+        )
+
     lookup: dict[str, dict] = {}
 
     with path.open("r", encoding="utf-8") as f:
@@ -28,6 +51,13 @@ def load_chunk_lookup(path: Path) -> dict[str, dict]:
             if chunk_id:
                 lookup[chunk_id] = chunk
 
+    if not lookup:
+        exit_with_message(
+            f"Nenhum chunk encontrado em {path}.\n"
+            "Gere novamente os chunks antes da consulta com:\n"
+            "  make chunk-data"
+        )
+
     return lookup
 
 
@@ -38,12 +68,24 @@ def retrieve(
     collection_name: str,
     chunk_lookup: dict[str, dict],
     chunks_path: Path,
+    embedding_model_name: str,
     top_k: int = 5,
     candidate_multiplier: int = DEFAULT_CANDIDATE_MULTIPLIER,
 ) -> list[dict]:
     client = QdrantClient(url=qdrant_url)
+    if not client.collection_exists(collection_name):
+        exit_with_message(
+            f"Colecao Qdrant '{collection_name}' nao encontrada em {qdrant_url}.\n"
+            "Indexe os chunks antes da consulta com:\n"
+            "  make index-data\n"
+            "Se voce usou outro nome de colecao ao indexar, informe o mesmo nome com "
+            "--collection-name."
+        )
 
-    vector = embedder.encode(query, normalize_embeddings=True).tolist()
+    vector = embedder.encode(
+        format_query(query, embedding_model_name),
+        normalize_embeddings=True,
+    ).tolist()
 
     candidate_limit = max(top_k, top_k * candidate_multiplier)
     results = client.query_points(
@@ -175,6 +217,7 @@ def main() -> None:
         collection_name=args.collection_name,
         chunk_lookup=chunk_lookup,
         chunks_path=args.chunks_path,
+        embedding_model_name=args.embedding_model,
         top_k=args.top_k,
         candidate_multiplier=args.candidate_multiplier,
     )

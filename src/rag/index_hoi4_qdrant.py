@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 CHUNKS_PATH = Path("data/processed/chunks/chunks.jsonl")
 DEFAULT_COLLECTION_NAME = "hoi4_wiki"
-DEFAULT_MODEL_NAME = "BAAI/bge-m3"
+DEFAULT_MODEL_NAME = "intfloat/multilingual-e5-small"
 
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_MAX_UPLOAD_WORKERS = 2
@@ -47,6 +47,16 @@ def batched(iterable, batch_size: int):
 
     while batch := list(islice(iterator, batch_size)):
         yield batch
+
+
+def needs_e5_prefix(model_name: str) -> bool:
+    return "e5" in model_name.lower()
+
+
+def format_passages(texts: list[str], model_name: str) -> list[str]:
+    if not needs_e5_prefix(model_name):
+        return texts
+    return [f"passage: {text}" for text in texts]
 
 
 def count_lines(path: Path) -> int:
@@ -108,6 +118,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--encode-batch-size", type=int, default=None)
+    parser.add_argument("--upload-batch-size", type=int, default=None)
     parser.add_argument("--upload-workers", type=int, default=DEFAULT_MAX_UPLOAD_WORKERS)
     parser.add_argument("--max-pending-uploads", type=int, default=DEFAULT_MAX_PENDING_UPLOADS)
     parser.add_argument("--max-seq-length", type=int, default=None)
@@ -117,6 +129,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    encode_batch_size = args.encode_batch_size or args.batch_size
+    upload_batch_size = args.upload_batch_size or args.batch_size
 
     model = SentenceTransformer(args.model, device=args.device)
     if args.max_seq_length is not None:
@@ -127,7 +141,7 @@ def main() -> None:
         prefer_grpc=True,
     )
 
-    vector_size = model.get_sentence_embedding_dimension()
+    vector_size = model.get_embedding_dimension()
 
     recreate_collection(
         client=client,
@@ -136,21 +150,21 @@ def main() -> None:
     )
 
     total_chunks = count_lines(args.chunks_path)
-    total_batches = (total_chunks + args.batch_size - 1) // args.batch_size
+    total_batches = (total_chunks + upload_batch_size - 1) // upload_batch_size
 
     point_id = 0
     pending_futures = set()
 
     with ThreadPoolExecutor(max_workers=args.upload_workers) as executor:
         for batch in tqdm(
-            batched(iter_chunks(args.chunks_path), args.batch_size),
+            batched(iter_chunks(args.chunks_path), upload_batch_size),
             total=total_batches,
         ):
-            texts = [item["text"] for item in batch]
+            texts = format_passages([item["text"] for item in batch], args.model)
 
             vectors = model.encode(
                 texts,
-                batch_size=args.batch_size,
+                batch_size=encode_batch_size,
                 normalize_embeddings=True,
                 show_progress_bar=False,
             )

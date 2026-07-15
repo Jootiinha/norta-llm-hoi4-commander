@@ -14,3 +14,13 @@
 
 
 Modelos que posso usar para chunk
+
+
+
+make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model intfloat/multilingual-e5-small --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 32"
+
+make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model sentence-transformers/all-MiniLM-L6-v2 --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 32"
+
+
+
+make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model sentence-transformers/all-MiniLM-L6-v2 --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 512"
