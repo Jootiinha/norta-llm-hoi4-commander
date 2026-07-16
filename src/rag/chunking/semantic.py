@@ -6,34 +6,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(items=None, **_kwargs):  # type: ignore[no-redef]
-        if items is None:
-            return []
-        return items
-
-    tqdm.write = print  # type: ignore[attr-defined]
-
-DEFAULT_INPUT_DIR = Path("data/interim/hoi4_wiki/pages")
-DEFAULT_OUTPUT = Path("data/processed/chunks/chunks.jsonl")
-DEFAULT_MANIFEST = Path("data/processed/chunks/manifest.jsonl")
-DEFAULT_MAX_CHARS = 1800
-DEFAULT_OVERLAP_UNITS = 1
-DEFAULT_SEMANTIC_MODEL = "BAAI/bge-m3"
-DEFAULT_SEMANTIC_THRESHOLD = 0.31
-DEFAULT_MIN_CHUNK_UNITS = 3
-DEFAULT_BATCH_SIZE = 64
-DEFAULT_DEVICE = "cpu"
-DEFAULT_STRUCTURED_GROUP_LINES = 8
-DEFAULT_MIN_UNIT_CHARS = 12
+from src.config import PIPELINE_CONFIG_PATH, get_config_section, require_config_value
+from tqdm import tqdm
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 WORD_RE = re.compile(r"\w+", re.UNICODE)
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 LIST_OR_TABLE_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|\|)")
-
 
 def parse_scalar(value: str) -> Any:
     value = value.strip()
@@ -486,26 +465,30 @@ def build_chunks_for_page(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cria chunks semanticos a partir das paginas Markdown da HOI4 Wiki.")
-    parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
-    parser.add_argument("--overlap-units", type=int, default=DEFAULT_OVERLAP_UNITS)
-    parser.add_argument("--semantic-model", type=str, default=DEFAULT_SEMANTIC_MODEL)
-    parser.add_argument("--semantic-threshold", type=float, default=DEFAULT_SEMANTIC_THRESHOLD)
-    parser.add_argument("--min-chunk-units", type=int, default=DEFAULT_MIN_CHUNK_UNITS)
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    parser.add_argument("--device", type=str, default=DEFAULT_DEVICE, choices=("cpu", "cuda", "mps"))
-    parser.add_argument("--structured-group-lines", type=int, default=DEFAULT_STRUCTURED_GROUP_LINES)
-    parser.add_argument("--min-unit-chars", type=int, default=DEFAULT_MIN_UNIT_CHARS)
-    parser.add_argument("--no-deduplicate-pages", action="store_true")
+    parser.add_argument("--config", type=Path, default=PIPELINE_CONFIG_PATH)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    page_paths = sorted(args.input_dir.glob("*.md"))
-    if args.no_deduplicate_pages:
+    config = get_config_section("chunk", args.config)
+
+    input_dir = Path(require_config_value(config, "input_dir", "chunk"))
+    output = Path(require_config_value(config, "output", "chunk"))
+    manifest = Path(require_config_value(config, "manifest", "chunk"))
+    max_chars = int(require_config_value(config, "max_chars", "chunk"))
+    overlap_units = int(require_config_value(config, "overlap_units", "chunk"))
+    semantic_model = str(require_config_value(config, "semantic_model", "chunk"))
+    semantic_threshold = float(require_config_value(config, "semantic_threshold", "chunk"))
+    min_chunk_units = int(require_config_value(config, "min_chunk_units", "chunk"))
+    batch_size = int(require_config_value(config, "batch_size", "chunk"))
+    device = str(require_config_value(config, "device", "chunk"))
+    structured_group_lines = int(require_config_value(config, "structured_group_lines", "chunk"))
+    min_unit_chars = int(require_config_value(config, "min_unit_chars", "chunk"))
+    deduplicate_pages = bool(require_config_value(config, "deduplicate_pages", "chunk"))
+
+    page_paths = sorted(input_dir.glob("*.md"))
+    if not deduplicate_pages:
         pages = []
         for page_path in page_paths:
             metadata, body = parse_front_matter(page_path.read_text(encoding="utf-8"))
@@ -521,14 +504,14 @@ def main() -> None:
     else:
         pages, duplicate_page_count = load_unique_pages(page_paths)
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.manifest.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
 
-    embedder = load_embedder(args.semantic_model, device=args.device)
+    embedder = load_embedder(semantic_model, device=device)
 
     total_chunks = 0
 
-    with args.output.open("w", encoding="utf-8") as chunk_file, args.manifest.open("w", encoding="utf-8") as manifest_file:
+    with output.open("w", encoding="utf-8") as chunk_file, manifest.open("w", encoding="utf-8") as manifest_file:
 
         for page in tqdm(pages, desc="Gerando chunks", unit="pagina", dynamic_ncols=True):
             page_path = page["page_path"]
@@ -539,15 +522,15 @@ def main() -> None:
                 page_path=page_path,
                 metadata=metadata,
                 body=body,
-                max_chars=args.max_chars,
-                overlap_units=args.overlap_units,
-                semantic_model=args.semantic_model,
-                semantic_threshold=args.semantic_threshold,
-                min_chunk_units=args.min_chunk_units,
-                batch_size=args.batch_size,
-                device=args.device,
-                structured_group_lines=args.structured_group_lines,
-                min_unit_chars=args.min_unit_chars,
+                max_chars=max_chars,
+                overlap_units=overlap_units,
+                semantic_model=semantic_model,
+                semantic_threshold=semantic_threshold,
+                min_chunk_units=min_chunk_units,
+                batch_size=batch_size,
+                device=device,
+                structured_group_lines=structured_group_lines,
+                min_unit_chars=min_unit_chars,
                 embedder=embedder,
             )
 
@@ -575,8 +558,8 @@ def main() -> None:
     tqdm.write(f"Paginas duplicadas ignoradas: {duplicate_page_count}")
     tqdm.write(f"Paginas processadas: {len(pages)}")
     tqdm.write(f"Chunks gerados: {total_chunks}")
-    tqdm.write(f"Arquivo de chunks: {args.output}")
-    tqdm.write(f"Manifest: {args.manifest}")
+    tqdm.write(f"Arquivo de chunks: {output}")
+    tqdm.write(f"Manifest: {manifest}")
 
 
 if __name__ == "__main__":

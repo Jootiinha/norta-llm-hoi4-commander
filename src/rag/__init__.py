@@ -1,1 +1,1 @@
-"""RAG indexing and retrieval components for HOI4 study material."""
+"""RAG modules for chunking, indexing, retrieval, and question answering."""

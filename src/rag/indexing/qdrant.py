@@ -11,16 +11,7 @@ from sentence_transformers import SentenceTransformer
 import torch
 from tqdm import tqdm
 
-
-CHUNKS_PATH = Path("data/processed/chunks/chunks.jsonl")
-DEFAULT_COLLECTION_NAME = "hoi4_wiki"
-DEFAULT_MODEL_NAME = "intfloat/multilingual-e5-small"
-
-DEFAULT_BATCH_SIZE = 64
-DEFAULT_MAX_UPLOAD_WORKERS = 2
-DEFAULT_MAX_PENDING_UPLOADS = 4
-
-DEFAULT_QDRANT_URL = "http://localhost:6333"
+from src.config import PIPELINE_CONFIG_PATH, get_config_section, require_config_key, require_config_value
 
 _thread_local = threading.local()
 
@@ -113,31 +104,34 @@ def recreate_collection(client: QdrantClient, collection_name: str, vector_size:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--chunks-path", type=Path, default=CHUNKS_PATH)
-    parser.add_argument("--collection-name", default=DEFAULT_COLLECTION_NAME)
-    parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    parser.add_argument("--encode-batch-size", type=int, default=None)
-    parser.add_argument("--upload-batch-size", type=int, default=None)
-    parser.add_argument("--upload-workers", type=int, default=DEFAULT_MAX_UPLOAD_WORKERS)
-    parser.add_argument("--max-pending-uploads", type=int, default=DEFAULT_MAX_PENDING_UPLOADS)
-    parser.add_argument("--max-seq-length", type=int, default=None)
-    parser.add_argument("--qdrant-url", default=DEFAULT_QDRANT_URL)
+    parser.add_argument("--config", type=Path, default=PIPELINE_CONFIG_PATH)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    encode_batch_size = args.encode_batch_size or args.batch_size
-    upload_batch_size = args.upload_batch_size or args.batch_size
+    config = get_config_section("index", args.config)
 
-    model = SentenceTransformer(args.model, device=args.device)
-    if args.max_seq_length is not None:
-        model.max_seq_length = args.max_seq_length
+    chunks_path = Path(require_config_value(config, "chunks_path", "index"))
+    collection_name = str(require_config_value(config, "collection_name", "index"))
+    model_name = str(require_config_value(config, "model", "index"))
+    device = require_config_value(config, "device", "index")
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    batch_size = int(require_config_value(config, "batch_size", "index"))
+    encode_batch_size = int(require_config_key(config, "encode_batch_size", "index") or batch_size)
+    upload_batch_size = int(require_config_key(config, "upload_batch_size", "index") or batch_size)
+    upload_workers = int(require_config_value(config, "upload_workers", "index"))
+    max_pending_uploads = int(require_config_value(config, "max_pending_uploads", "index"))
+    max_seq_length = require_config_key(config, "max_seq_length", "index")
+    qdrant_url = str(require_config_value(config, "qdrant_url", "index"))
+
+    model = SentenceTransformer(model_name, device=str(device))
+    if max_seq_length is not None:
+        model.max_seq_length = int(max_seq_length)
 
     client = QdrantClient(
-        url=args.qdrant_url,
+        url=qdrant_url,
         prefer_grpc=True,
     )
 
@@ -145,22 +139,22 @@ def main() -> None:
 
     recreate_collection(
         client=client,
-        collection_name=args.collection_name,
+        collection_name=collection_name,
         vector_size=vector_size,
     )
 
-    total_chunks = count_lines(args.chunks_path)
+    total_chunks = count_lines(chunks_path)
     total_batches = (total_chunks + upload_batch_size - 1) // upload_batch_size
 
     point_id = 0
     pending_futures = set()
 
-    with ThreadPoolExecutor(max_workers=args.upload_workers) as executor:
+    with ThreadPoolExecutor(max_workers=upload_workers) as executor:
         for batch in tqdm(
-            batched(iter_chunks(args.chunks_path), upload_batch_size),
+            batched(iter_chunks(chunks_path), upload_batch_size),
             total=total_batches,
         ):
-            texts = format_passages([item["text"] for item in batch], args.model)
+            texts = format_passages([item["text"] for item in batch], model_name)
 
             vectors = model.encode(
                 texts,
@@ -180,12 +174,12 @@ def main() -> None:
             future = executor.submit(
                 upload_points,
                 points,
-                args.collection_name,
-                args.qdrant_url,
+                collection_name,
+                qdrant_url,
             )
             pending_futures.add(future)
 
-            if len(pending_futures) >= args.max_pending_uploads:
+            if len(pending_futures) >= max_pending_uploads:
                 done, pending_futures = wait(
                     pending_futures,
                     return_when=FIRST_COMPLETED,

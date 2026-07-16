@@ -1,0 +1,73 @@
+collect:
+  api_url: "https://hoi4.paradoxwikis.com/api.php"
+  output: "data/raw/hoi4_wiki/hoi4_pages.jsonl"
+  user_agent: "joao-hoi4-study-bot/0.1 (contato: joaocrm@outlook.com)"
+  workers: 1
+  delay: 0.7
+  list_delay: 0.2
+  limit: 0
+  resume: true
+  retries: 3
+
+convert:
+  input: "data/raw/hoi4_wiki/hoi4_pages.jsonl"
+  output_dir: "data/interim/hoi4_wiki/pages"
+  manifest: "data/interim/hoi4_wiki/manifest.jsonl"
+  min_chars: 200
+
+chunk:
+  input_dir: "data/interim/hoi4_wiki/pages"
+  output: "data/processed/chunks/chunks.jsonl"
+  manifest: "data/processed/chunks/manifest.jsonl"
+  max_chars: 1800
+  overlap_units: 1
+  semantic_model: "BAAI/bge-m3"
+  semantic_threshold: 0.31
+  min_chunk_units: 3
+  batch_size: 64
+  device: "cpu"
+  structured_group_lines: 8
+  min_unit_chars: 12
+  deduplicate_pages: true
+
+index:
+  chunks_path: "data/processed/chunks/chunks.jsonl"
+  collection_name: "hoi4_wiki"
+  model: "intfloat/multilingual-e5-small"
+  device: "auto"
+  batch_size: 64
+  encode_batch_size: null
+  upload_batch_size: null
+  upload_workers: 2
+  max_pending_uploads: 4
+  max_seq_length: null
+  qdrant_url: "http://localhost:6333"
+
+ask:
+  model: "models/qwen3-0.6b"
+  question: "Quais focos iniciais ajudam o Brasil a industrializar?"
+  top_k: 5
+  candidate_multiplier: 4
+  max_new_tokens: 220
+  embedding_model: "intfloat/multilingual-e5-small"
+  collection_name: "hoi4_wiki"
+  qdrant_url: "http://localhost:6333"
+  chunks_path: "data/processed/chunks/chunks.jsonl"
+  enable_thinking: false
+  show_context: false
+
+web:
+  host: "127.0.0.1"
+  port: 7860
+  chunks_dir: "data/processed/chunks"
+  embedding_models:
+    - "intfloat/multilingual-e5-small"
+    - "intfloat/multilingual-e5-large"
+    - "BAAI/bge-m3"
+    - "sentence-transformers/all-MiniLM-L6-v2"
+  generation:
+    do_sample: false
+    temperature: 0.7
+    top_p: 0.9
+    repetition_penalty: 1.1
+    no_repeat_ngram_size: 6

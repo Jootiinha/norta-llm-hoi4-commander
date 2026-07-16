@@ -15,12 +15,45 @@
 
 Modelos que posso usar para chunk
 
+Sim. O artigo.md:439 já funciona bem como protocolo experimental e rascunho. O problema, o domínio, as hipóteses e as métricas estão coerentes. Ainda não está pronto como artigo científico
+  completo porque faltam referências, resultados e algumas decisões metodológicas.
 
+  O principal risco é a novidade. Sua pergunta central é muito próxima de Is Semantic Chunking Worth the Computational Cost?, que já comparou chunking semântico, custo, retrieval e geração,
+  sem encontrar ganhos consistentes. Você deve apresentar seu trabalho como extensão ou replicação em um cenário específico: corpus semi-estruturado em inglês, consultas em PT-BR e hardware
+  local limitado. Qu et al., 2025 (https://aclanthology.org/2025.findings-naacl.114/)
 
-make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model intfloat/multilingual-e5-small --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 32"
+  Uma pergunta mais distintiva seria:
 
-make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model sentence-transformers/all-MiniLM-L6-v2 --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 32"
+  > Em um sistema RAG local com consultas em português e corpus especializado em inglês, qual estratégia de chunking maximiza a cobertura de evidências e a qualidade das respostas sob
+  > orçamentos fixos de contexto e computação?
 
+  O que ajustar antes dos experimentos
 
+  - Separe as variáveis. Primeiro compare chunking mantendo embedding e retrieval fixos. Depois compare embeddings. Deixe BM25, híbrido e reranking para um experimento adicional.
+  - Substitua evidence_chunk_ids por evidências independentes do chunker: página, seção e intervalo textual. O próprio trabalho HiChunk destaca que benchmarks comuns têm problemas para
+    avaliar chunking quando as evidências são esparsas. HiChunk, ACL 2026 (https://aclanthology.org/2026.acl-long.1372/)
 
-make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--semantic-model sentence-transformers/all-MiniLM-L6-v2 --max-chars 2400 --overlap-units 1 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 512"
+  - Compare métodos sob o mesmo orçamento de tokens recuperados. Usar apenas o mesmo top_k favorece estratégias com chunks maiores.
+  - Meça tamanhos em tokens, não apenas caracteres.
+  - Separe perguntas factuais das estratégicas. Perguntas estratégicas podem ter várias respostas válidas e são melhores para avaliação de geração do que para Recall@k.
+  - Congele uma versão do corpus, registrando data da coleta, revisão da wiki e versão do jogo.
+  - Crie conjuntos distintos de desenvolvimento e teste. Ajuste thresholds no desenvolvimento e não altere configurações após observar o teste.
+  - Fixe o modelo utilizado pelo chunking semântico; caso ele varie junto com o embedder de retrieval, os efeitos ficam confundidos.
+  - Inclua uma baseline de tradução da consulta PT-BR para inglês. Query translation é uma abordagem clássica e competitiva em recuperação cross-lingual. Saleh e Pecina, ACL 2020
+    (https://aclanthology.org/2020.acl-main.613/)
+
+  Também há uma inconsistência temporal no texto: o resumo diz “comparamos” em artigo.md:451, mas os experimentos ainda não aconteceram. Durante a fase de projeto, use “compararemos” ou
+  trate o documento explicitamente como protocolo. Depois, reescreva resumo e conclusão com os resultados reais.
+
+  Por onde começar a pesquisa
+
+  1. Trabalho mais próximo da sua pergunta: Is Semantic Chunking Worth the Computational Cost? (https://aclanthology.org/2025.findings-naacl.114/). Leia metodologia, datasets, controle de
+     custo e limitações. Sua diferenciação deve surgir daí.
+
+  7. Efeito do tamanho e posição do contexto: Lost in the Middle (https://aclanthology.org/2024.tacl-1.9/). Fundamenta por que mais chunks ou mais contexto não necessariamente melhoram a
+     resposta.
+
+  8. Fundamento do RAG: Lewis et al., 2020 (https://arxiv.org/abs/2005.11401).
+
+  Seu primeiro ciclo prático deveria ser: ler Qu et al. e HiChunk, reformular a pergunta, congelar o corpus e criar 10 a 15 perguntas piloto com evidências textuais exatas. Só depois vale
+  expandir para as 30 perguntas e implementar toda a matriz experimental.

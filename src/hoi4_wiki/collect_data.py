@@ -14,13 +14,13 @@ from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from tqdm import tqdm
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-DEFAULT_API_URL = "https://hoi4.paradoxwikis.com/api.php"
-OUTPUT_PATH = Path("data/raw/hoi4_wiki/hoi4_pages.jsonl")
-DEFAULT_USER_AGENT = "joao-hoi4-study-bot/0.1 (contato: joaocrm@outlook.com)"
+from src.config import PIPELINE_CONFIG_PATH, get_config_section, require_config_value
 
 HEADERS = {
-    "User-Agent": DEFAULT_USER_AGENT,
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
 }
@@ -51,7 +51,7 @@ def api_get(
     session: requests.Session,
     api_url: str,
     params: dict[str, Any],
-    retries: int = 3,
+    retries: int,
 ) -> dict[str, Any]:
     base_params = {
         "format": "json",
@@ -103,6 +103,7 @@ def get_all_pages(
     session: requests.Session,
     api_url: str,
     list_delay: float,
+    retries: int,
 ) -> list[dict[str, Any]]:
     pages = []
     apcontinue = None
@@ -118,7 +119,7 @@ def get_all_pages(
         if apcontinue:
             params["apcontinue"] = apcontinue
 
-        data = api_get(session, api_url, params)
+        data = api_get(session, api_url, params, retries)
         pages.extend(data["query"]["allpages"])
 
         if "continue" not in data:
@@ -168,6 +169,7 @@ def get_page_content(
     session: requests.Session,
     api_url: str,
     title: str,
+    retries: int,
 ) -> dict[str, Any] | None:
     data = api_get(
         session,
@@ -177,7 +179,8 @@ def get_page_content(
             "page": title,
             "prop": "text|revid|displaytitle",
             "redirects": 1,
-        }
+        },
+        retries,
     )
 
     if "parse" not in data:
@@ -222,75 +225,40 @@ def collect_page(
     user_agent: str,
     title: str,
     delay: float,
+    retries: int,
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     if delay > 0:
         time.sleep(delay)
 
     session = thread_session(user_agent)
     try:
-        return title, get_page_content(session, api_url, title), None
+        return title, get_page_content(session, api_url, title, retries), None
     except Exception as exc:
         return title, None, str(exc)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--api-url",
-        default=os.environ.get("HOI4_WIKI_API_URL", DEFAULT_API_URL),
-        help="Endpoint MediaWiki API da HOI4 Wiki.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=OUTPUT_PATH,
-        help="Arquivo JSONL de saida.",
-    )
-    parser.add_argument(
-        "--user-agent",
-        default=os.environ.get("HOI4_WIKI_USER_AGENT", DEFAULT_USER_AGENT),
-        help="Header User-Agent enviado para a MediaWiki API.",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="Numero de paginas coletadas em paralelo. Use 1 para modo conservador.",
-    )
-    parser.add_argument(
-        "--delay",
-        type=float,
-        default=0.7,
-        help="Pausa por pagina antes de chamar action=parse.",
-    )
-    parser.add_argument(
-        "--list-delay",
-        type=float,
-        default=0.2,
-        help="Pausa entre chamadas de paginacao da lista allpages.",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help="Limita a quantidade de paginas processadas. 0 processa todas.",
-    )
-    parser.add_argument(
-        "--resume",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Pula paginas ja presentes no JSONL de saida.",
-    )
+    parser.add_argument("--config", type=Path, default=PIPELINE_CONFIG_PATH)
     args = parser.parse_args()
+    config = get_config_section("collect", args.config)
 
-    output_path = args.output
+    api_url = os.environ.get("HOI4_WIKI_API_URL", require_config_value(config, "api_url", "collect"))
+    user_agent = os.environ.get("HOI4_WIKI_USER_AGENT", require_config_value(config, "user_agent", "collect"))
+    output_path = Path(require_config_value(config, "output", "collect"))
+    workers = max(1, int(require_config_value(config, "workers", "collect")))
+    delay = float(require_config_value(config, "delay", "collect"))
+    list_delay = float(require_config_value(config, "list_delay", "collect"))
+    limit = int(require_config_value(config, "limit", "collect"))
+    resume = bool(require_config_value(config, "resume", "collect"))
+    retries = int(require_config_value(config, "retries", "collect"))
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    session = build_session(args.user_agent)
-    pages = get_all_pages(session, args.api_url, args.list_delay)
+    session = build_session(user_agent)
+    pages = get_all_pages(session, api_url, list_delay, retries)
     print(f"Total de páginas encontradas: {len(pages)}")
 
-    existing_titles = read_existing_titles(output_path) if args.resume else set()
+    existing_titles = read_existing_titles(output_path) if resume else set()
     if existing_titles:
         print(f"Paginas ja coletadas: {len(existing_titles)}")
 
@@ -299,11 +267,10 @@ def main() -> None:
         for page in pages
         if isinstance(page.get("title"), str) and page["title"] not in existing_titles
     ]
-    if args.limit > 0:
-        titles = titles[: args.limit]
+    if limit > 0:
+        titles = titles[:limit]
 
-    workers = max(1, args.workers)
-    mode = "a" if args.resume else "w"
+    mode = "a" if resume else "w"
     written = 0
     failed = 0
 
@@ -311,7 +278,7 @@ def main() -> None:
         if workers == 1:
             iterator = tqdm(titles, desc="Coletando paginas")
             for title in iterator:
-                _, item, error = collect_page(args.api_url, args.user_agent, title, args.delay)
+                _, item, error = collect_page(api_url, user_agent, title, delay, retries)
                 if error:
                     failed += 1
                     print(f"Erro ao processar {title}: {error}")
@@ -325,10 +292,11 @@ def main() -> None:
                 futures = [
                     executor.submit(
                         collect_page,
-                        args.api_url,
-                        args.user_agent,
+                        api_url,
+                        user_agent,
                         title,
-                        args.delay,
+                        delay,
+                        retries,
                     )
                     for title in titles
                 ]

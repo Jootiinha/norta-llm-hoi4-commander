@@ -2,16 +2,18 @@ import argparse
 import json
 import re
 from pathlib import Path
+import sys
 from typing import Any
 
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from tqdm import tqdm
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-DEFAULT_INPUT = Path("data/raw/hoi4_wiki/hoi4_pages.jsonl")
-DEFAULT_OUTPUT_DIR = Path("data/interim/hoi4_wiki/pages")
-DEFAULT_MANIFEST = Path("data/interim/hoi4_wiki/manifest.jsonl")
+from src.config import PIPELINE_CONFIG_PATH, get_config_section, require_config_value
 
 DROP_SELECTORS = [
     ".toc",
@@ -276,26 +278,29 @@ def convert_record(record: dict[str, Any]) -> tuple[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    parser.add_argument("--min-chars", type=int, default=200)
+    parser.add_argument("--config", type=Path, default=PIPELINE_CONFIG_PATH)
     args = parser.parse_args()
+    config = get_config_section("convert", args.config)
 
-    records = read_jsonl(args.input)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    args.manifest.parent.mkdir(parents=True, exist_ok=True)
+    input_path = Path(require_config_value(config, "input", "convert"))
+    output_dir = Path(require_config_value(config, "output_dir", "convert"))
+    manifest_path = Path(require_config_value(config, "manifest", "convert"))
+    min_chars = int(require_config_value(config, "min_chars", "convert"))
+
+    records = read_jsonl(input_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
     written = 0
-    with args.manifest.open("w", encoding="utf-8") as manifest:
+    with manifest_path.open("w", encoding="utf-8") as manifest:
         for index, record in enumerate(tqdm(records, desc="Convertendo paginas"), start=1):
             title, markdown = convert_record(record)
             content_without_meta = markdown.split("---", 2)[-1].strip()
-            if len(content_without_meta) < args.min_chars:
+            if len(content_without_meta) < min_chars:
                 continue
 
             filename = f"{index:05d}-{slugify(title, f'page-{index}')}.md"
-            output_path = args.output_dir / filename
+            output_path = output_dir / filename
             output_path.write_text(markdown, encoding="utf-8")
 
             manifest.write(
@@ -316,8 +321,8 @@ def main() -> None:
 
     print(f"Paginas lidas: {len(records)}")
     print(f"Markdown gerado: {written}")
-    print(f"Diretorio: {args.output_dir}")
-    print(f"Manifest: {args.manifest}")
+    print(f"Diretorio: {output_dir}")
+    print(f"Manifest: {manifest_path}")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHUNKS_DIR="$ROOT_DIR/data/processed/chunks"
 HISTORY_DIR="$CHUNKS_DIR/history"
-CHUNK_ARGS_VALUE="${1-}"
+CONFIG_PATH="$ROOT_DIR/configs/pipeline.yaml"
 
 files=(
   "chunks.jsonl"
@@ -43,7 +43,11 @@ done
 {
   printf "created_at=%s\n" "$(date -Iseconds)"
   printf "source_dir=%s\n" "$CHUNKS_DIR"
-  printf "chunk_args=%s\n" "$CHUNK_ARGS_VALUE"
+  printf "config_path=%s\n" "$CONFIG_PATH"
 } > "$snapshot_dir/backup.env"
+
+if [[ -f "$CONFIG_PATH" ]]; then
+  cp "$CONFIG_PATH" "$snapshot_dir/pipeline.yaml"
+fi
 
 printf "Backup de chunks salvo em %s\n" "$snapshot_dir"

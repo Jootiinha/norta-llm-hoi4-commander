@@ -28,9 +28,7 @@ O codigo Python fica diretamente em `src/` e deve ser executado pelos caminhos d
 │   └── setup.sh            # configura venv e instala dependencias
 ├── src/                    # codigo Python do projeto
 │   ├── hoi4_wiki/          # coleta, limpeza, normalizacao e chunking
-│   ├── norta_llm/          # fluxo de inferencia, independente da web
-│   │   └── run_model.py
-│   ├── rag/                # embeddings, indexacao e recuperacao
+│   ├── rag/                # perguntas, chunking, embeddings, indexacao e recuperacao
 │   ├── sft/                # geracao/validacao de dataset SFT
 │   ├── training/           # LoRA/QLoRA e avaliacao
 ├── vectorstores/           # indices Qdrant/Chroma locais; nao versionar conteudo gerado
@@ -52,11 +50,13 @@ make setup
 
 O alvo `setup` executa `scripts/setup.sh`, configura `.venv` local via Poetry e instala as dependencias.
 
-Rodar inferencia padrao:
+Consultar o RAG:
 
 ```bash
-make run
+make ask-rag
 ```
+
+Os parametros de coleta, conversao, chunking, indexacao, pergunta e web ficam em `configs/pipeline.yaml`.
 
 Coletar dados brutos da HOI4 Wiki e converter para Markdown limpo:
 
@@ -64,11 +64,7 @@ Coletar dados brutos da HOI4 Wiki e converter para Markdown limpo:
 make extract-data
 ```
 
-Para acelerar a coleta, prefira paralelismo moderado:
-
-```bash
-make extract-data COLLECT_ARGS="--workers 4 --delay 0.2"
-```
+Para acelerar a coleta, prefira paralelismo moderado configurando `collect.workers` e `collect.delay` em `configs/pipeline.yaml`.
 
 O alvo coleta `data/raw/hoi4_wiki/hoi4_pages.jsonl`, remove menu/navegacao e grava paginas em `data/interim/hoi4_wiki/pages/` com manifesto em `data/interim/hoi4_wiki/manifest.jsonl`.
 
@@ -79,14 +75,6 @@ make chunk-data
 ```
 
 O chunker le `data/interim/hoi4_wiki/pages/` e grava `data/processed/chunks/chunks.jsonl` com um `manifest.jsonl` por pagina.
-
-Executar inferencia manualmente:
-
-```bash
-poetry run python -B src/norta_llm/run_model.py \
-  --model models/qwen3-0.6b \
-  --prompt "Monte uma build inicial para o Brasil em Hearts of Iron IV focada em industria e exercito."
-```
 
 Limpar caches Python:
 
@@ -106,7 +94,7 @@ make clean
 - Ao alterar RAG, embeddings, indexacao ou recuperacao, trabalhe em `src/rag/`.
 - Ao alterar geracao de perguntas/respostas para SFT, trabalhe em `src/sft/`.
 - Ao alterar LoRA/QLoRA, scripts de treino ou avaliacao, trabalhe em `src/training/`.
-- Ao alterar o fluxo de IA, trabalhe em `src/norta_llm/`.
+- Ao alterar o fluxo de perguntas/RAG, trabalhe em `src/rag/questions/`.
 - Ao criar scripts auxiliares de shell, coloque-os em `scripts/`.
 - Atualize o `README.md` quando mudar comandos, estrutura ou fluxo de uso.
 - Evite mudar os nomes dos diretorios de modelos sem atualizar o `Makefile`, os scripts em `scripts/` e o README.
@@ -115,10 +103,10 @@ make clean
 
 Para mudancas que nao carregam modelos, rode pelo menos validacoes de sintaxe/compilacao dos arquivos alterados.
 
-Para mudancas em inferencia, valide com um modelo local pequeno quando disponivel:
+Para mudancas em perguntas/RAG, valide com um modelo local pequeno quando disponivel:
 
 ```bash
-make run
+make ask-rag
 ```
 
 Se a validacao de inferencia nao for executada por custo de memoria, tempo ou ausencia do modelo local, registre isso na resposta final.

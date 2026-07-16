@@ -72,10 +72,11 @@ poetry run huggingface-cli login
 ├── scripts/                # scripts de conveniencia
 │   └── setup.sh            # configura venv e instala dependencias
 ├── src/                    # codigo Python do projeto
-│   ├── hoi4_wiki/          # coleta MediaWiki, limpeza, normalizacao e chunking
-│   ├── norta_llm/          # fluxo de inferencia, independente da web
-│   │   └── run_model.py
-│   ├── rag/                # embeddings, indexacao e recuperacao
+│   ├── hoi4_wiki/          # coleta MediaWiki, limpeza e normalizacao
+│   ├── rag/                # RAG modular
+│   │   ├── questions/      # perguntas: prompt, recuperacao, LangChain/LangGraph e LLM local
+│   │   ├── chunking/       # chunking semantico das paginas limpas
+│   │   └── indexing/       # indexacao vetorial, hoje via Qdrant
 │   ├── sft/                # geracao/validacao de dataset SFT
 │   ├── training/           # treino LoRA/QLoRA e avaliacao
 ├── vectorstores/           # indices locais Qdrant/Chroma, ignorados pelo Git
@@ -149,13 +150,15 @@ Links de referencia:
 - https://huggingface.co/amadeusai/AV-FI-Qwen2.5-7B-PT-BR-Instruct
 - https://huggingface.co/baidu/Unlimited-OCR
 
-## Rodar inferencia
+## Consultar o RAG
 
-O script padrao usa `models/qwen3-0.6b`:
+Depois de gerar chunks e indexar no Qdrant, consulte o assistente com:
 
 ```bash
-make run
+make ask-rag
 ```
+
+A pergunta, modelo local, colecao Qdrant e demais parametros ficam em `configs/pipeline.yaml`, na secao `ask`.
 
 ## Preparar dados da HOI4 Wiki
 
@@ -167,15 +170,7 @@ make extract-data
 
 O coletor suporta retomada automatica. Se o arquivo de saida ja existir, paginas ja presentes sao puladas por padrao. Para uma coleta mais rapida, use poucos workers e reduza o intervalo com cuidado:
 
-```bash
-make extract-data COLLECT_ARGS="--workers 4 --delay 0.2"
-```
-
-Para testar em poucas paginas:
-
-```bash
-make extract-data COLLECT_ARGS="--limit 20"
-```
+Edite `configs/pipeline.yaml`, secao `collect`, para ajustar `workers`, `delay`, `limit`, `resume`, URL da API e arquivo de saida.
 
 O conversor remove itens recorrentes de menu e navegacao da wiki, como tabela de conteudo, navboxes, secoes de ferramentas, referencias e imagens de navegacao. A saida fica em `data/interim/hoi4_wiki/pages/`, com um `manifest.jsonl` em `data/interim/hoi4_wiki/`.
 
@@ -185,53 +180,13 @@ Para transformar as paginas limpas em chunks para RAG e SFT:
 make chunk-data
 ```
 
-O chunker le `data/interim/hoi4_wiki/pages/`, usa embeddings semanticos para detectar mudancas de assunto, produz `data/processed/chunks/chunks.jsonl` e grava um `manifest.jsonl` com contagem de chunks por pagina. Para mudar os parametros:
-
-```bash
-make chunk-data CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-model BAAI/bge-m3 --semantic-threshold 0.31 --min-chunk-units 3 --structured-group-lines 8 --min-unit-chars 12 --device cpu --batch-size 64"
-```
+O alvo executa o modulo `src.rag.chunking.cli`. O chunker le `data/interim/hoi4_wiki/pages/`, usa embeddings semanticos para detectar mudancas de assunto, produz `data/processed/chunks/chunks.jsonl` e grava um `manifest.jsonl` com contagem de chunks por pagina. Para mudar parametros, edite `configs/pipeline.yaml`, secao `chunk`.
 
 Antes de gerar embeddings, o chunker agrupa linhas estruturadas de listas/tabelas com `--structured-group-lines` e remove unidades muito curtas com `--min-unit-chars`. Isso reduz o numero de chamadas ao modelo semantico em paginas grandes de listas/tabelas.
 
-O modelo semantico precisa estar disponivel localmente ou ser baixado pelo Hugging Face na primeira execucao. Se houver GPU NVIDIA disponivel, use `--device cuda` e aumente `--batch-size` conforme a VRAM:
+O modelo semantico precisa estar disponivel localmente ou ser baixado pelo Hugging Face na primeira execucao. Se houver GPU NVIDIA disponivel, configure `chunk.device: cuda` e aumente `chunk.batch_size` conforme a VRAM. Por padrao, o chunker ignora paginas duplicadas com o mesmo `page_id`/`revision_id` ou mesmo hash de conteudo; para auditar tudo, use `chunk.deduplicate_pages: false`.
 
-```bash
-make chunk-data CHUNK_ARGS="--device cuda --batch-size 128"
-```
-
-Por padrao, o chunker ignora paginas duplicadas com o mesmo `page_id`/`revision_id` ou mesmo hash de conteudo. Para auditar tudo sem deduplicacao:
-
-```bash
-make chunk-data CHUNK_ARGS="--no-deduplicate-pages"
-```
-
-Para registrar CPU, memoria, disco e GPU durante a geracao de chunks:
-
-```bash
-make profile-chunk-data
-```
-
-Os relatorios sao gravados em `metrics/<timestamp>-chunk-data/`, com:
-
-- `samples.csv`: amostras coletadas ao longo da execucao;
-- `summary.json`: resumo com picos, totais principais, `started_at` e `finished_at`;
-- `stdout.log` e `stderr.log`: saidas do comando monitorado, com timestamp por linha.
-
-O `samples.csv` tambem inclui `timestamp` e `elapsed_seconds`, o que permite montar graficos de linha do tempo para CPU, memoria, disco e GPU.
-
-Voce tambem pode ajustar o intervalo de coleta e os argumentos do chunker:
-
-```bash
-make profile-chunk-data MONITOR_INTERVAL=0.5 CHUNK_ARGS="--max-chars 1600 --overlap-units 1 --semantic-threshold 0.31 --structured-group-lines 8 --min-unit-chars 12 --device cuda --batch-size 128"
-```
-
-Para monitorar qualquer outro comando do projeto:
-
-```bash
-make profile-command COMMAND="poetry run python -B src/rag/index_hoi4_qdrant.py"
-```
-
-Antes de cada nova execucao de `make chunk-data`, o projeto salva automaticamente um snapshot dos artefatos atuais em `data/processed/chunks/history/<timestamp>/`. Quando existirem, ele copia `chunks.jsonl`, `manifest.jsonl` e `summary.json`, e grava um `backup.env` com a data e os `CHUNK_ARGS` usados na rodada anterior. Isso facilita comparar iteracoes de chunking sem perder o estado anterior.
+Antes de cada nova execucao de `make chunk-data`, o projeto salva automaticamente um snapshot dos artefatos atuais em `data/processed/chunks/history/<timestamp>/`. Quando existirem, ele copia `chunks.jsonl`, `manifest.jsonl`, `summary.json` e uma copia de `configs/pipeline.yaml`. Isso facilita comparar iteracoes de chunking sem perder o estado anterior.
 
 ## Indexar no Qdrant
 
@@ -241,34 +196,23 @@ Para indexar os chunks no Qdrant com o embedder padrao:
 make index-data
 ```
 
-O payload salvo no Qdrant guarda apenas metadados do chunk e uma referencia por `chunk_id`. O texto completo continua em `data/processed/chunks/chunks.jsonl`, reduzindo o tamanho do indice e o volume de escrita no banco.
+O alvo executa o modulo `src.rag.indexing.cli`. O payload salvo no Qdrant guarda apenas metadados do chunk e uma referencia por `chunk_id`. O texto completo continua em `data/processed/chunks/chunks.jsonl`, reduzindo o tamanho do indice e o volume de escrita no banco.
 
 O indexador usa `intfloat/multilingual-e5-small` por padrao, um bom equilibrio entre qualidade multilíngue e velocidade. Para modelos E5, o indexador adiciona automaticamente o prefixo `passage:` aos chunks e a consulta adiciona `query:` às perguntas.
 
-Para acelerar, reduza o comprimento maximo processado por chunk e ajuste separadamente o batch de embedding e o batch de upload:
-
-```bash
-make index-data INDEX_ARGS="--device cuda --encode-batch-size 256 --upload-batch-size 512 --max-seq-length 512"
-make index-data INDEX_ARGS="--model intfloat/multilingual-e5-large --device cuda --encode-batch-size 32 --upload-batch-size 128 --max-seq-length 512"
-```
+Para acelerar, edite `configs/pipeline.yaml`, secao `index`, e reduza `max_seq_length` ou ajuste `device`, `encode_batch_size` e `upload_batch_size`.
 
 Se voce trocar o modelo de embedding na indexacao, use o mesmo modelo na consulta:
 
 ```bash
-poetry run python -B src/rag/ask_hoi4_rag.py \
-  --model models/qwen3-0.6b \
-  --question "Quais focos iniciais ajudam o Brasil a industrializar?" \
-  --embedding-model intfloat/multilingual-e5-small
+make ask-rag
 ```
 
 Se os chunks estiverem em outro caminho, a consulta precisa apontar para o mesmo arquivo usado na indexacao:
 
-```bash
-poetry run python -B src/rag/ask_hoi4_rag.py \
-  --model models/qwen3-0.6b \
-  --question "Quais focos iniciais ajudam o Brasil a industrializar?" \
-  --chunks-path data/processed/chunks/chunks.jsonl
-```
+Edite `ask.chunks_path` em `configs/pipeline.yaml`.
+
+O alvo `ask-rag` executa `src.rag.questions.cli`, que monta o fluxo `retrieve -> prompt -> generate` com LangGraph.
 
 Para usar uma interface web local para conversar com o RAG:
 
@@ -277,15 +221,6 @@ make web-rag
 ```
 
 Acesse `http://127.0.0.1:7860`. A interface usa por padrao `models/qwen3-0.6b`, `intfloat/multilingual-e5-small`, `data/processed/chunks/chunks.jsonl` e a colecao Qdrant `hoi4_wiki`. Antes de perguntar, garanta que os chunks foram indexados com `make index-data`.
-
-Para escolher outro modelo ou prompt:
-
-```bash
-poetry run python -B src/norta_llm/run_model.py \
-  --model models/gemma-3-gaia-ptbr-4b-it \
-  --prompt "Monte uma build inicial para o Brasil em Hearts of Iron IV focada em industria e exercito." \
-  --max-new-tokens 300
-```
 
 ## Limpeza
 
