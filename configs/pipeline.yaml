@@ -59,6 +59,7 @@ ask:
 web:
   host: "127.0.0.1"
   port: 7860
+  models_dir: "models"
   chunks_dir: "data/processed/chunks"
   embedding_models:
     - "intfloat/multilingual-e5-small"
